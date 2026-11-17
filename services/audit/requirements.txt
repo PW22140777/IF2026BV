@@ -1,0 +1,2 @@
+# Dependencias propias de audit-service
+cryptography>=42

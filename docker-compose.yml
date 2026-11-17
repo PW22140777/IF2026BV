@@ -1,0 +1,182 @@
+# Infraestructura Física: administración de los recursos inmobiliarios de la escuela
+#
+#   cp .env.example .env
+#   docker compose up --build
+#
+# Aplicación:            http://localhost:8080
+# Documentación (API):   http://localhost:8080/docs
+# Herramientas (solo desde tu computadora):
+#   RabbitMQ  http://localhost:15672    Consul      http://localhost:8500
+#   Jaeger    http://localhost:16686    Grafana     http://localhost:3000
+#   Prometheus http://localhost:9090
+#
+# Escalar un servicio:   docker compose up -d --scale inmuebles=3
+
+name: infraestructura-fisica
+
+x-entorno-comun: &entorno-comun
+  JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en .env}
+  SESION_INACTIVIDAD_MINUTOS: ${SESION_INACTIVIDAD_MINUTOS:-30}
+  SESION_MAXIMA_HORAS: ${SESION_MAXIMA_HORAS:-4}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+  CONSUL_URL: http://consul:8500
+  OTLP_ENDPOINT: http://jaeger:4318
+  LOG_LEVEL: INFO
+
+x-backend: &backend
+  restart: unless-stopped
+  depends_on:
+    rabbitmq: { condition: service_healthy }
+    consul: { condition: service_healthy }
+  networks: [interna]
+
+services:
+  # ------------------------------------------------------------ aplicación
+  gateway:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: gateway } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: gateway
+      FRONTEND_URL: http://frontend:80
+      LIMITE_LOGIN_POR_MINUTO: ${LIMITE_LOGIN_POR_MINUTO:-5}
+      LIMITE_API_POR_MINUTO: ${LIMITE_API_POR_MINUTO:-300}
+    ports: ["8080:8000"]        # único puerto de la aplicación expuesto
+    depends_on:
+      consul: { condition: service_healthy }
+      frontend: { condition: service_started }
+
+  auth:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/auth } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: auth
+      DATABASE_URL: ${DATABASE_URL_AUTH:-postgresql+psycopg://auth_svc:${DB_PASS_AUTH}@postgres:5432/${POSTGRES_DB}}
+      ADMIN_NOMBRE: ${ADMIN_NOMBRE:-Administrador}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@escuela.mx}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345}
+      CREAR_USUARIOS_DEMO: ${CREAR_USUARIOS_DEMO:-true}
+
+  inmuebles:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/inmuebles } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: inmuebles
+      DATABASE_URL: ${DATABASE_URL_INMUEBLES:-postgresql+psycopg://inmuebles_svc:${DB_PASS_INMUEBLES}@postgres:5432/${POSTGRES_DB}}
+
+  servicios:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/servicios } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: servicios
+      DATABASE_URL: ${DATABASE_URL_SERVICIOS:-postgresql+psycopg://servicios_svc:${DB_PASS_SERVICIOS}@postgres:5432/${POSTGRES_DB}}
+
+  audit:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/audit } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: audit
+      DATABASE_URL: ${DATABASE_URL_AUDIT:-postgresql+psycopg://audit_svc:${DB_PASS_AUDIT}@postgres:5432/${POSTGRES_DB}}
+      LLAVE_FIRMA_PATH: /data/llaves/audit_ed25519.pem
+    volumes:
+      - llaves_audit:/data/llaves   # la llave de firma sobrevive a reinicios
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks: [interna]
+
+  # -------------------------------------------------------- infraestructura
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: [local-db]   # no se levanta si usas DATABASE_URL_* (p. ej. Supabase); actívalo con --profile local-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_PASS_AUTH: ${DB_PASS_AUTH}
+      DB_PASS_INMUEBLES: ${DB_PASS_INMUEBLES}
+      DB_PASS_SERVICIOS: ${DB_PASS_SERVICIOS}
+      DB_PASS_AUDIT: ${DB_PASS_AUDIT}
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro   # esquema y usuarios (solo la primera vez)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [interna]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports: ["127.0.0.1:15672:15672"]
+    volumes:
+      - datos_rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [interna]
+
+  consul:
+    image: hashicorp/consul:1.20
+    restart: unless-stopped
+    command: agent -dev -client=0.0.0.0 -log-level=warn
+    ports: ["127.0.0.1:8500:8500"]
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [interna]
+
+  # ---------------------------------------------------------- observabilidad
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:16686:16686"]
+    networks: [interna]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    volumes:
+      - ./observabilidad/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["127.0.0.1:9090:9090"]
+    depends_on: [consul]
+    networks: [interna]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observabilidad/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observabilidad/grafana/tableros:/var/lib/grafana/tableros:ro
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [prometheus, jaeger]
+    networks: [interna]
+
+networks:
+  interna:
+
+volumes:
+  datos_postgres:
+  datos_rabbitmq:
+  llaves_audit:

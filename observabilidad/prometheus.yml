@@ -1,0 +1,18 @@
+# Prometheus descubre las instancias en Consul: al escalar un servicio,
+# las nuevas réplicas se empiezan a medir sin cambiar este archivo.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: servicios
+    metrics_path: /metrics
+    consul_sd_configs:
+      - server: consul:8500
+    relabel_configs:
+      - source_labels: [__meta_consul_service]
+        regex: consul
+        action: drop
+      - source_labels: [__meta_consul_service]
+        target_label: servicio
+      - source_labels: [__meta_consul_service_id]
+        target_label: instancia
