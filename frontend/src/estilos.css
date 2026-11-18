@@ -274,6 +274,11 @@ textarea { resize: vertical; }
 .lista-registro li { margin: 0.3rem 0; }
 
 /* ------------------------------------------------------------- mantenimientos */
+.rejilla-mantenimiento { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem 2rem; }
+.cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem 1rem; margin: 0; }
+.cifras dt { font-size: 0.82rem; color: var(--grafito); }
+.cifras dd { margin: 0; font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.subtitulo-tarjeta { font-size: 0.95rem; margin: 1rem 0 0.4rem; }
 .casillas { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
 .casillas label { font-weight: 400; }
 

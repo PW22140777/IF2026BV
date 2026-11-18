@@ -51,6 +51,7 @@ RUTAS: dict[str, str] = {
     "/api/v1/auditoria": "audit",
     "/api/v1/comentarios": "comentarios",
     "/api/v1/mantenimientos": "mantenimiento",
+    "/api/v1/resumen/mantenimientos": "mantenimiento",
 }
 SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "comentarios", "mantenimiento")
 # Sin token: el login y el inicio con la cuenta institucional (también cuentan en el límite de logins)

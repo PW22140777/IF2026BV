@@ -16,6 +16,14 @@ const COLOR_ESTADO = {
   OPERATIVO: 'bien', EN_MANTENIMIENTO: 'medio',
   BUENO: 'bien', REGULAR: 'medio', MALO: 'mal',
   FUERA_DE_SERVICIO: 'fuera',
+  RESUELTO: 'bien', PARCIAL: 'medio', NO_RESUELTO: 'mal',   // resultado de un mantenimiento
+}
+const RESULTADOS = [['RESUELTO', 'Resuelto'], ['PARCIAL', 'Parcial'], ['NO_RESUELTO', 'No resuelto']]
+
+// 45 -> «45 min»; 150 -> «2 h 30 min»
+function duracionLegible(minutos) {
+  if (minutos === null || minutos === undefined) return '—'
+  return minutos < 60 ? `${minutos} min` : `${Math.floor(minutos / 60)} h${minutos % 60 ? ` ${minutos % 60} min` : ''}`
 }
 
 function Indicador({ titulo, valor, de, nota, alerta }) {
@@ -86,6 +94,7 @@ export function Resumen({ campusActivo = '', alAbrir }) {
   const [inmuebles, setInmuebles] = useState(null)
   const [consumos, setConsumos] = useState([])
   const [fallas, setFallas] = useState([])
+  const [mantenimiento, setMantenimiento] = useState(null)   // null si el servicio no responde: el resto sigue
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -94,8 +103,9 @@ export function Resumen({ campusActivo = '', alAbrir }) {
       api('/resumen/inmuebles', { consulta }),
       api('/resumen/consumos', { consulta }),
       api('/resumen/servicios', { consulta }),
+      api('/resumen/mantenimientos', { consulta }).catch(() => null),
     ])
-      .then(([i, c, s]) => { setInmuebles(i); setConsumos(c); setFallas(s) })
+      .then(([i, c, s, m]) => { setInmuebles(i); setConsumos(c); setFallas(s); setMantenimiento(m) })
       .catch((e) => setError(e.message))
   }, [campusActivo])
 
@@ -135,6 +145,13 @@ export function Resumen({ campusActivo = '', alAbrir }) {
           <Indicador titulo="Servicios con problema" valor={numero(fallas.length)} de={serviciosActivos}
                      nota={fallas.length ? 'Con falla, suspendidos o en mantenimiento' : 'Todos operando'}
                      alerta={fallas.length > 0} />
+          {mantenimiento && (
+            <Indicador titulo="Mantenimientos abiertos" valor={numero(mantenimiento.programadas + mantenimiento.en_curso)}
+                       nota={mantenimiento.vencidas || mantenimiento.sin_asignar
+                         ? `${mantenimiento.vencidas} vencidos · ${mantenimiento.sin_asignar} sin técnico`
+                         : `${mantenimiento.en_curso} en curso; ninguno vencido`}
+                       alerta={mantenimiento.vencidas > 0} />
+          )}
         </div>
 
         <div className="rejilla-tarjetas">
@@ -196,6 +213,42 @@ export function Resumen({ campusActivo = '', alAbrir }) {
             </>
           )}
         </section>
+
+        {mantenimiento && (
+          <section className="tarjeta">
+            <h2>Mantenimientos</h2>
+            <div className="rejilla-mantenimiento">
+              <dl className="cifras">
+                <div><dt>Programados</dt><dd>{numero(mantenimiento.programadas)}</dd></div>
+                <div><dt>En curso</dt><dd>{numero(mantenimiento.en_curso)}</dd></div>
+                <div><dt>Vencidos</dt><dd className={mantenimiento.vencidas ? 'texto-alerta' : undefined}>{numero(mantenimiento.vencidas)}</dd></div>
+                <div><dt>Sin técnico asignado</dt><dd>{numero(mantenimiento.sin_asignar)}</dd></div>
+                <div><dt>Tiempo promedio de atención</dt>
+                  <dd>{duracionLegible(mantenimiento.minutos_promedio)}</dd></div>
+              </dl>
+              <div>
+                <p className="nota-tarjeta">Terminados en los últimos {mantenimiento.dias} días, por resultado</p>
+                <Leyenda estados={RESULTADOS} />
+                <BarraApilada etiqueta="Terminados" grupos={mantenimiento.por_resultado} estados={RESULTADOS} />
+              </div>
+            </div>
+            {mantenimiento.vencidas_detalle.length > 0 && (
+              <>
+                <h3 className="subtitulo-tarjeta">Vencidos</h3>
+                <ul className="lista-fallas">
+                  {mantenimiento.vencidas_detalle.map((v) => (
+                    <li key={v.id}>
+                      <button type="button" className="boton-texto" onClick={() => alAbrir?.('mantenimientos', v.id)}>
+                        #{v.id} {v.plantilla_nombre}
+                      </button>
+                      <span className="tenue">{v.recurso_nombre} · hace {v.dias_vencida} {v.dias_vencida === 1 ? 'día' : 'días'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
 
         <div className="rejilla-tarjetas">
           <section className="tarjeta">

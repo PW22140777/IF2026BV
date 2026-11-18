@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
-from sqlalchemy import case, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -388,6 +388,68 @@ async def adjuntar_evidencia(id: int, _: UsuarioToken = Depends(requiere_rol(*ED
     raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, evidencias.MENSAJE_NO_DISPONIBLE)
 
 
+# ------------------------------------------------------------------- resumen
+router_resumen = APIRouter(prefix="/resumen", tags=["Resumen"])
+DIAS_RESUMEN = 30
+
+
+def _del_campus(campus_id: int):
+    """Órdenes cuyo recurso está en el campus (el inventario por su área; un servicio por su destino)."""
+    areas = select(Area.id).where(Area.campus_id == campus_id)
+    edificios = select(Edificio.id).where(Edificio.campus_id == campus_id)
+    o = OrdenMantenimiento
+    return or_(
+        and_(o.recurso == "EDIFICIO", o.recurso_id.in_(edificios)),
+        and_(o.recurso == "AREA", o.recurso_id.in_(areas)),
+        and_(o.recurso == "INVENTARIO", o.recurso_id.in_(
+            select(ElementoInventario.id).where(ElementoInventario.area_id.in_(areas)))),
+        and_(o.recurso == "SERVICIO", o.recurso_id.in_(select(ServicioBasico.id).where(or_(
+            ServicioBasico.campus_id == campus_id, ServicioBasico.edificio_id.in_(edificios),
+            ServicioBasico.area_id.in_(areas))))),
+    )
+
+
+@router_resumen.get("/mantenimientos", summary="Indicadores de mantenimiento para el tablero")
+async def resumen_mantenimientos(
+    campus_id: int | None = Query(None, description="Vacío = todos los campus"),
+    _: UsuarioToken = Depends(requiere_rol(*TODOS)),
+    db: AsyncSession = Depends(get_db),
+):
+    o = OrdenMantenimiento
+    base = [o.eliminado_en.is_(None)] + ([_del_campus(campus_id)] if campus_id is not None else [])
+    hoy = date.today()
+    desde = datetime.now(timezone.utc) - timedelta(days=DIAS_RESUMEN)
+
+    async def contar(*condiciones) -> int:
+        return (await db.execute(select(func.count()).select_from(o).where(*base, *condiciones))).scalar_one()
+
+    con_tecnico = select(OrdenTecnico.orden_id).where(OrdenTecnico.quitado_en.is_(None))
+    terminadas = [o.estado == "TERMINADA", o.terminada_en >= desde]
+    por_resultado = dict((await db.execute(
+        select(o.resultado, func.count()).where(*base, *terminadas).group_by(o.resultado))).all())
+    # Tiempo de atención: de «Iniciar» a «Terminar», en minutos
+    segundos = (await db.execute(select(func.avg(func.extract("epoch", o.terminada_en - o.iniciada_en)))
+                                 .where(*base, *terminadas))).scalar_one()
+    vencidas = list((await db.execute(select(o).where(*base, o.estado == "PROGRAMADA", o.fecha_programada < hoy)
+                                      .order_by(o.fecha_programada, o.id).limit(5))).scalars())
+    detalles = await _detalles(db, vencidas)
+    return {
+        "programadas": await contar(o.estado == "PROGRAMADA"),
+        "en_curso": await contar(o.estado == "EN_CURSO"),
+        "vencidas": await contar(o.estado == "PROGRAMADA", o.fecha_programada < hoy),
+        "sin_asignar": await contar(o.estado.in_(ABIERTAS), o.id.not_in(con_tecnico)),
+        "dias": DIAS_RESUMEN,
+        "terminadas": sum(por_resultado.values()),
+        "por_resultado": {r: por_resultado.get(r, 0) for r in ("RESUELTO", "PARCIAL", "NO_RESUELTO")},
+        "minutos_promedio": round(float(segundos) / 60) if segundos is not None else None,
+        "vencidas_detalle": [
+            {"id": d.id, "plantilla_nombre": d.plantilla_nombre, "recurso_nombre": d.recurso_nombre,
+             "fecha_programada": d.fecha_programada.isoformat(), "dias_vencida": (hoy - d.fecha_programada).days}
+            for d in detalles
+        ],
+    }
+
+
 # ---------------------------------------------------- órdenes automáticas
 async def generar_periodicas() -> int:
     """Abre las órdenes de las plantillas periódicas que ya tocan. Devuelve cuántas creó."""
@@ -487,6 +549,6 @@ app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
-    routers=[router_plantillas, router_ordenes, router_programar],
+    routers=[router_plantillas, router_ordenes, router_programar, router_resumen],
     consumidores=_tareas() if configuracion().rabbitmq_url else (),
 )

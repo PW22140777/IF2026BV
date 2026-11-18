@@ -255,6 +255,11 @@ def probar_mantenimientos(adm, tec, con, area, agua):
     assert cliente.post("/api/v1/mantenimientos/programar", headers=adm).status_code == 200
     paso("el Administrador cancela con motivo; un técnico programa a mano y queda asignado; las evidencias aún no están")
 
+    resumen = cliente.get("/api/v1/resumen/mantenimientos", headers=con).json()
+    assert resumen["por_resultado"]["RESUELTO"] >= 1 and resumen["programadas"] >= 1, resumen
+    assert resumen["minutos_promedio"] is not None, resumen
+    paso("el resumen cuenta las órdenes abiertas y las terminadas por resultado")
+
     # Si el recurso se elimina, sus órdenes abiertas se cancelan solas
     cliente.request("DELETE", f"/api/v1/inventario/{aire['id']}", headers=tec,
                     json={"motivo": "Limpieza de la prueba de mantenimientos"}).raise_for_status()
