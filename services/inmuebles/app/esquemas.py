@@ -6,8 +6,9 @@ que en la base no aceptan vacío (p. ej. nombre) tampoco aceptan null.
 from datetime import date
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
+from comun.propiedades import PROPIEDADES_RESERVADAS, DefinicionPropiedad, claves_unicas
 from comun.recursos import SalidaBase
 
 EstadoInmueble = Literal["OPERATIVO", "EN_MANTENIMIENTO", "FUERA_DE_SERVICIO"]
@@ -150,52 +151,9 @@ class AreaSalida(SalidaBase):
 
 
 # ---------------------------------------------------------- tipos de elemento
-TipoPropiedad = Literal["texto", "numero", "opcion", "fecha", "si_no"]
-PROPIEDADES_RESERVADAS = {"total", "total_lineal", "total_area", "total_volumen", "total_volumen_espesor"}
-
-
-class DefinicionPropiedad(BaseModel):
-    """Una propiedad que llevan los elementos de un tipo, p. ej. la capacidad en BTU de un aire."""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-    clave: str = Field(pattern=r"^[a-z][a-z0-9_]{0,49}$", examples=["btu"],
-                       description="Nombre interno: minúsculas, números y guion bajo")
-    etiqueta: str = Field(min_length=1, max_length=80, examples=["Capacidad"])
-    tipo: TipoPropiedad
-    unidad: str | None = Field(default=None, max_length=20, examples=["BTU"])
-    minimo: float | None = None
-    maximo: float | None = None
-    opciones: list[str] | None = Field(default=None, max_length=50)
-    requerida: bool = False
-
-    @model_validator(mode="after")
-    def coherente(self):
-        if self.tipo == "opcion":
-            opciones = [o.strip() for o in self.opciones or [] if o.strip()]
-            if len(opciones) < 2:
-                raise ValueError(f"La propiedad «{self.etiqueta}» es de opción: indica al menos dos opciones")
-            if len(set(opciones)) != len(opciones):
-                raise ValueError(f"La propiedad «{self.etiqueta}» tiene opciones repetidas")
-            self.opciones = opciones
-        elif self.opciones:
-            raise ValueError(f"Solo las propiedades de tipo opción llevan opciones («{self.etiqueta}»)")
-        if self.tipo != "numero" and (self.minimo is not None or self.maximo is not None):
-            raise ValueError(f"Solo las propiedades numéricas llevan mínimo y máximo («{self.etiqueta}»)")
-        if self.minimo is not None and self.maximo is not None and self.minimo > self.maximo:
-            raise ValueError(f"En «{self.etiqueta}» el mínimo es mayor que el máximo")
-        if self.clave in PROPIEDADES_RESERVADAS:
-            raise ValueError(f"La clave «{self.clave}» está reservada por el sistema")
-        return self
-
-
-def _claves_unicas(definiciones: list[DefinicionPropiedad] | None):
-    if definiciones:
-        claves = [d.clave for d in definiciones]
-        repetidas = sorted({c for c in claves if claves.count(c) > 1})
-        if repetidas:
-            raise ValueError(f"Hay propiedades con la misma clave: {', '.join(repetidas)}")
-    return definiciones
+# Las definiciones de propiedades viven en shared: también las usan las listas de verificación
+# de los mantenimientos (shared/comun/propiedades.py)
+_claves_unicas = claves_unicas
 
 
 class TipoElementoCrear(BaseModel):

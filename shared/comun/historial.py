@@ -23,6 +23,10 @@ PARTICIPIOS = {
     "MODIFICAR": "modificado",
     "ELIMINAR": "eliminado",
     "RESTAURAR": "restaurado",
+    # Transiciones de una orden de mantenimiento
+    "INICIAR": "iniciada",
+    "TERMINAR": "terminada",
+    "CANCELAR": "cancelada",
     "LOGIN": "iniciada",
     "LOGIN_FALLIDO": "fallida",
     "LOGOUT": "cerrada",

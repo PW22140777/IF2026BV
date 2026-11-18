@@ -273,6 +273,10 @@ textarea { resize: vertical; }
 .lista-registro { margin: 0 0 1.25rem; padding-left: 1.1rem; }
 .lista-registro li { margin: 0.3rem 0; }
 
+/* ------------------------------------------------------------- mantenimientos */
+.casillas { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; }
+.casillas label { font-weight: 400; }
+
 /* ---------------------------------------------------------------- comentarios */
 .lista-comentarios, .respuestas { list-style: none; margin: 0; padding: 0; }
 .lista-comentarios > li { padding: 0.6rem 0; border-bottom: 1px solid var(--linea-suave); }

@@ -35,12 +35,13 @@ Roles:
 - **Propiedades flexibles:** cada recurso tiene una columna `propiedades` (JSONB) para datos según el tipo, p. ej. `{"btu": 12000}`. Se agregan, cambian o quitan con `PUT` y `DELETE /{recurso}/{id}/propiedades/{clave}`, y cada cambio queda en el historial.
 - **Tipos de elemento:** el tipo de un elemento de inventario debe existir en `tipos_elemento`, que define sus propiedades (`propiedades_definidas`: clave, etiqueta, tipo texto/numero/opcion/fecha/si_no, límites, opciones, requerida) y si usa medidas. `validar_elemento` revisa las propiedades al crear, modificar o cambiar una sola. Solo el Administrador cambia el catálogo (`roles_edicion=SOLO_ADMIN` en `crear_router_recurso`); la clave no cambia y no se elimina un tipo con elementos activos.
 - **Observadores y comentarios:** el rol `OBSERVADOR` solo se obtiene entrando con la cuenta institucional (`services/auth/app/oauth.py`: código + PKCE, `id_token` validado contra Microsoft, inquilino y dominio). Un correo con contraseña no entra por OAuth y un Observador no entra con contraseña. `comentarios-service` guarda los comentarios: los abre un Observador; Técnico y Administrador solo responden (`respuesta_a`); solo el Administrador oculta, con motivo (borrado lógico). `OAUTH_MODO_PRUEBA=true` es solo para pruebas en base local.
+- **Mantenimientos:** `mantenimiento-service` guarda plantillas (`plantillas_mantenimiento`) y órdenes (`ordenes_mantenimiento`, técnicos en `ordenes_tecnicos`). Solo el Administrador cambia plantillas, asigna y cancela; los técnicos asignados inician y terminan. El estado del recurso no lo escribe este servicio: publica `orden_mantenimiento.iniciada/terminada.v1` con `estado_recurso_nuevo` e inmuebles/servicios lo aplican (`comun/mantenimientos.py`). Las listas de verificación usan `comun/propiedades.py`, igual que los tipos de elemento. Las evidencias son un esqueleto (501).
 - **Auditoría:** `audit_log` es de solo agregar (triggers bloquean `UPDATE`, `DELETE` y `TRUNCATE`). Cada registro tiene `hash = SHA-256(hash_anterior + JSON canónico)` y firma Ed25519. Solo `audit-service` escribe ahí.
 
 ## Arquitectura
 
 ```text
-Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / audit ──> PostgreSQL (una sola base)
+Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (una sola base)
                  │                     └── auth ⇄ Microsoft Entra ID (registro de Observadores)
                  └── frontend (Nginx)              └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                        └────> servicios (reacciones)
@@ -54,6 +55,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/inmuebles/` | Campus, edificios, áreas, inventario y el catálogo `/tipos-elemento`, y `/resumen/inmuebles`. |
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
 | `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario, servicios y consumos; respuestas y moderación. |
+| `services/mantenimiento/` | Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales; técnicos asignados; iniciar y terminar con lista de verificación. |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |
 | `shared/comun/` | Paquete común instalado en cada imagen (ver abajo). |
 | `frontend/` | React + Vite. Selector global «Campus con el que trabajas» que filtra todas las pantallas. |

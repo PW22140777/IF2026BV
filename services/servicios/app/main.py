@@ -309,7 +309,14 @@ async def al_eliminar_inmueble(evento: dict) -> None:
 def _consumidores():
     from comun.mensajeria import consumidor
 
-    return [consumidor("servicios.inmuebles", ["campus.eliminado.*", "edificio.eliminado.*", "area.eliminado.*"], al_eliminar_inmueble)]
+    from comun.mantenimientos import PATRONES, manejador_de_estados
+
+    # Un mantenimiento iniciado o terminado deja el servicio en el estado que dice su plantilla
+    aplicar = manejador_de_estados("servicios.mantenimiento", {
+        "SERVICIO": (ServicioBasico, ServicioSalida, ("OPERANDO", "CON_FALLA", "SUSPENDIDO", "EN_MANTENIMIENTO")),
+    })
+    return [consumidor("servicios.inmuebles", ["campus.eliminado.*", "edificio.eliminado.*", "area.eliminado.*"], al_eliminar_inmueble),
+            consumidor("servicios.mantenimiento", PATRONES, aplicar)]
 
 
 app = crear_app(

@@ -102,6 +102,14 @@ services:
       SERVICIO_NOMBRE: comentarios
       DATABASE_URL: ${DATABASE_URL_COMENTARIOS:-postgresql+psycopg://comentarios_svc:${DB_PASS_COMENTARIOS}@postgres:5432/${POSTGRES_DB}}
 
+  mantenimiento:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/mantenimiento } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: mantenimiento
+      DATABASE_URL: ${DATABASE_URL_MANTENIMIENTO:-postgresql+psycopg://mantenimiento_svc:${DB_PASS_MANTENIMIENTO}@postgres:5432/${POSTGRES_DB}}
+
   frontend:
     build: ./frontend
     restart: unless-stopped
@@ -121,6 +129,7 @@ services:
       DB_PASS_SERVICIOS: ${DB_PASS_SERVICIOS}
       DB_PASS_AUDIT: ${DB_PASS_AUDIT}
       DB_PASS_COMENTARIOS: ${DB_PASS_COMENTARIOS}
+      DB_PASS_MANTENIMIENTO: ${DB_PASS_MANTENIMIENTO}
     volumes:
       - datos_postgres:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro   # esquema y usuarios (solo la primera vez)

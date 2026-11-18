@@ -124,6 +124,7 @@ def main():
     paso("cada tipo de elemento define sus propiedades y la API las valida; solo el Administrador cambia el catálogo")
 
     probar_observadores(adm, tec, con, ed)
+    probar_mantenimientos(adm, tec, con, area, agua)
 
     internet = cliente.post("/api/v1/servicios", headers=tec,
                             json={"tipo": "INTERNET", "nombre": f"Enlace {sufijo}", "campus_id": campus["id"]}).json()
@@ -181,6 +182,84 @@ def entrar_como_observador(correo, nombre):
     canje = cliente.post("/api/v1/auth/oauth/canjear", json={"codigo": destino.split("#codigo=")[1]})
     canje.raise_for_status()
     return {"Authorization": f"Bearer {canje.json()['access_token']}"}, canje.json()
+
+
+def probar_mantenimientos(adm, tec, con, area, agua):
+    plantillas = {p["nombre"]: p for p in cliente.get("/api/v1/mantenimientos/plantillas", headers=con).json()}
+    correctivo = plantillas["Correctivo de aire acondicionado"]
+    preventivo = plantillas["Preventivo de aire acondicionado"]
+    reparacion = plantillas["Reparación de servicio con falla"]
+    id_tecnico = cliente.get("/api/v1/auth/yo", headers=tec).json()["id"]
+    assert cliente.post("/api/v1/mantenimientos/plantillas", headers=tec, json={
+        "nombre": "No debe crearse", "recurso": "AREA", "estado_resuelto": "OPERATIVO",
+        "estado_parcial": "OPERATIVO", "estado_no_resuelto": "FUERA_DE_SERVICIO"}).status_code == 403
+    r = cliente.post("/api/v1/mantenimientos/plantillas", headers=adm, json={
+        "nombre": "Mala", "recurso": "AREA", "estado_resuelto": "BUENO",
+        "estado_parcial": "OPERATIVO", "estado_no_resuelto": "FUERA_DE_SERVICIO"})
+    assert r.status_code == 422 and "no es un estado" in r.text, r.text
+    paso("solo el Administrador crea plantillas, y sus estados deben ser del tipo de recurso")
+
+    # Por estado: un aire acondicionado que pasa a «Malo» abre su orden correctiva
+    aire = cliente.post("/api/v1/inventario", headers=tec, json={
+        "area_id": area["id"], "tipo": "AIRE_ACONDICIONADO", "propiedades": {"btu": 12000}})
+    aire.raise_for_status()
+    aire = aire.json()
+    cliente.patch(f"/api/v1/inventario/{aire['id']}", headers=tec, json={"estado": "MALO"}).raise_for_status()
+    abiertas = lambda: cliente.get("/api/v1/mantenimientos/ordenes", headers=con, params={
+        "recurso": "INVENTARIO", "recurso_id": aire["id"], "estado": "PROGRAMADA,EN_CURSO"}).json()
+    esperar(lambda: any(o["plantilla_id"] == correctivo["id"] for o in abiertas()),
+            "un aire acondicionado en mal estado abre solo su orden correctiva")
+    orden = next(o for o in abiertas() if o["plantilla_id"] == correctivo["id"])
+    url = f"/api/v1/mantenimientos/ordenes/{orden['id']}"
+
+    assert cliente.post(f"{url}/iniciar", headers=tec).status_code == 403          # todavía sin asignar
+    cliente.put(f"{url}/tecnicos", headers=adm, json={"tecnicos": [id_tecnico]}).raise_for_status()
+    assert cliente.post(f"{url}/iniciar", headers=con).status_code == 403
+    r = cliente.post(f"{url}/iniciar", headers=tec)
+    assert r.status_code == 200 and r.json()["estado"] == "EN_CURSO", r.text
+    r = cliente.post(f"{url}/terminar", headers=tec, json={"resultado": "RESUELTO", "respuestas": {}})
+    assert r.status_code == 422 and "Diagnóstico" in r.text, r.text
+    r = cliente.post(f"{url}/terminar", headers=tec, json={
+        "resultado": "RESUELTO", "respuestas": {"diagnostico": "Capacitor dañado", "refrigerante_recargado": False},
+        "notas": "Se cambió el capacitor"})
+    r.raise_for_status()
+    assert r.json()["terminada_por"] == id_tecnico and r.json()["estado_recurso_nuevo"] == "BUENO", r.text
+    esperar(lambda: cliente.get(f"/api/v1/inventario/{aire['id']}", headers=con).json()["estado"] == "BUENO",
+            "el técnico asignado inicia y termina con su lista de verificación; el aire queda en buen estado")
+
+    # Un servicio con falla: al iniciar pasa a «En mantenimiento»; el Administrador puede cancelar
+    cliente.patch(f"/api/v1/servicios/{agua['id']}", headers=tec, json={"estado": "CON_FALLA"}).raise_for_status()
+    abiertas_agua = lambda: cliente.get("/api/v1/mantenimientos/ordenes", headers=con, params={
+        "recurso": "SERVICIO", "recurso_id": agua["id"], "estado": "PROGRAMADA,EN_CURSO"}).json()
+    esperar(lambda: any(o["plantilla_id"] == reparacion["id"] for o in abiertas_agua()),
+            "un servicio con falla abre solo su orden de reparación")
+    orden_agua = next(o for o in abiertas_agua() if o["plantilla_id"] == reparacion["id"])
+    url_agua = f"/api/v1/mantenimientos/ordenes/{orden_agua['id']}"
+    cliente.put(f"{url_agua}/tecnicos", headers=adm, json={"tecnicos": [id_tecnico]}).raise_for_status()
+    cliente.post(f"{url_agua}/iniciar", headers=tec).raise_for_status()
+    esperar(lambda: cliente.get(f"/api/v1/servicios/{agua['id']}", headers=con).json()["estado"] == "EN_MANTENIMIENTO",
+            "al iniciar la reparación, el servicio pasa a «en mantenimiento»")
+    assert cliente.post(f"{url_agua}/cancelar", headers=tec, json={"motivo": "No aplica"}).status_code == 403
+    r = cliente.post(f"{url_agua}/cancelar", headers=adm, json={"motivo": "Prueba de cancelación"})
+    assert r.status_code == 200 and r.json()["estado"] == "CANCELADA", r.text
+
+    # A mano: el técnico programa un preventivo y queda asignado; no se duplica; evidencias aún no
+    r = cliente.post("/api/v1/mantenimientos/ordenes", headers=tec,
+                     json={"plantilla_id": preventivo["id"], "recurso_id": aire["id"]})
+    r.raise_for_status()
+    manual = r.json()
+    assert manual["tecnicos"] == [id_tecnico] and manual["origen"] == "MANUAL", manual
+    assert cliente.post("/api/v1/mantenimientos/ordenes", headers=tec,
+                        json={"plantilla_id": preventivo["id"], "recurso_id": aire["id"]}).status_code == 409
+    assert cliente.post(f"/api/v1/mantenimientos/ordenes/{manual['id']}/evidencias", headers=tec).status_code == 501
+    assert cliente.post("/api/v1/mantenimientos/programar", headers=adm).status_code == 200
+    paso("el Administrador cancela con motivo; un técnico programa a mano y queda asignado; las evidencias aún no están")
+
+    # Si el recurso se elimina, sus órdenes abiertas se cancelan solas
+    cliente.request("DELETE", f"/api/v1/inventario/{aire['id']}", headers=tec,
+                    json={"motivo": "Limpieza de la prueba de mantenimientos"}).raise_for_status()
+    esperar(lambda: cliente.get(f"/api/v1/mantenimientos/ordenes/{manual['id']}", headers=con).json()["estado"] == "CANCELADA",
+            "al eliminar el recurso, sus órdenes abiertas se cancelan solas")
 
 
 def probar_observadores(adm, tec, con, ed):

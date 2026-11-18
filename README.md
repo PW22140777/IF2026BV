@@ -180,6 +180,36 @@ Reglas: un correo que ya tiene cuenta con contraseña no puede entrar por Micros
 
 **Base que ya existe:** aplica `db/migraciones/007_observadores_y_comentarios.sql` como dueño de la base, con `-v pass_comentarios=…` (la contraseña de `DB_PASS_COMENTARIOS`).
 
+## Mantenimientos programados
+
+Los técnicos no cambian estados a mano: abren la orden, pulsan **«Iniciar mantenimiento»**, llenan la lista de verificación y pulsan **«Terminar mantenimiento»**. El sistema registra quién inició y quién terminó, cuándo, lo que se capturó, las notas y el resultado, y deja el recurso en el estado que corresponde.
+
+**Plantillas** (Administración → Plantillas de mantenimiento, solo Administrador). Cada una dice:
+
+- **A qué se aplica:** edificio, área, elemento de inventario (y, si quieres, un tipo, como `AIRE_ACONDICIONADO`) o servicio básico.
+- **Cuándo se abre una orden:** *por estado* (cuando una persona deja el recurso en uno de los estados elegidos), *periódica* (cada N días desde el último mantenimiento terminado) o *manual*.
+- **Qué se registra:** una lista de verificación con el mismo formato que las propiedades de los tipos de elemento (texto, número con unidad y límites, opciones, fecha, sí/no y si es obligatorio).
+- **Cómo queda el recurso:** un estado opcional al iniciar (p. ej. un servicio pasa a «En mantenimiento») y uno por cada resultado: resuelto, parcial o no resuelto.
+
+Vienen tres: «Correctivo de aire acondicionado» (por estado: malo o fuera de servicio), «Preventivo de aire acondicionado» (cada 90 días) y «Reparación de servicio con falla» (por estado: con falla).
+
+**Órdenes** (Mantenimiento → Órdenes): `Programada → En curso → Terminada`, o `Cancelada` con motivo.
+
+| Rol | Puede |
+| --- | --- |
+| Administrador | Asignar uno o más técnicos, cancelar con motivo, abrir ya las periódicas pendientes, y también atender cualquier orden |
+| Técnico | Iniciar y terminar las órdenes asignadas a él; programar una a mano desde el panel de un recurso (queda asignada a él) |
+| Consulta, Observador | Ver órdenes e historial |
+
+- Una orden automática nace sin técnicos: el Administrador la asigna. No puede haber dos órdenes abiertas de la misma plantilla para el mismo recurso.
+- El resultado «Parcial» solo termina la orden; si hace falta otra, se programa a mano.
+- Si el recurso se elimina, sus órdenes abiertas se cancelan solas.
+- **Evidencias (fotos, PDF):** quedan como esqueleto (`services/mantenimiento/app/evidencias.py`); las rutas responden 501 y el botón aparece deshabilitado hasta que se defina dónde se guardan los archivos.
+
+**Cómo funciona por dentro.** `mantenimiento-service` (`/api/v1/mantenimientos`) guarda plantillas, órdenes y técnicos asignados (quitar a uno marca `quitado_en`; no se borra). No escribe las tablas de los recursos: al iniciar o terminar publica `orden_mantenimiento.iniciada.v1` / `.terminada.v1` con `estado_recurso_nuevo`, e inmuebles-service o servicios-service aplican el estado y dejan su evento a nombre del sistema (`comun/mantenimientos.py`). Escucha `edificio/area/inventario/servicio.*.v1` para abrir órdenes por estado (solo cambios hechos por una persona, así el estado que deja un mantenimiento no abre otra) y para cancelar las de un recurso eliminado. Una tarea de fondo abre las periódicas al arrancar y cada hora, con `pg_advisory_xact_lock` para que varias réplicas no dupliquen órdenes.
+
+**Base que ya existe:** aplica `db/migraciones/008_mantenimientos.sql` como dueño de la base con `-v pass_mantenimiento=…` (`DB_PASS_MANTENIMIENTO`).
+
 ## Tipos de elemento y sus propiedades
 
 Cada elemento de inventario tiene un **tipo** (pared, aire acondicionado, mesa…) que sale del catálogo `tipos_elemento`. El tipo define:

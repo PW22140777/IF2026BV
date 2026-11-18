@@ -5,6 +5,7 @@ import { useCatalogos } from '../catalogos'
 import { legible } from '../recursos'
 import { resumenDefiniciones } from './EditorDefiniciones'
 import { Comentarios } from './Comentarios'
+import { MantenimientosDelRecurso } from './MantenimientosDelRecurso'
 import { Formulario } from './Formulario'
 import { Historial } from './Historial'
 
@@ -115,7 +116,7 @@ function ServiciosDelRecurso({ filtro, id }) {
   )
 }
 
-function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerrar }) {
+function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerrar, alAbrir }) {
   const catalogos = useCatalogos()
   const [modo, setModo] = useState('ver')         // ver | editar | eliminar
   const [motivo, setMotivo] = useState('')
@@ -150,6 +151,8 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
     if (campo.tipo === 'servicio') return catalogos.nombreServicio(v)
     if (campo.tipo === 'tipoElemento') return catalogos.nombreTipo(v)
     if (campo.tipo === 'definiciones') return resumenDefiniciones(v)
+    if (campo.tipo === 'estado') return legible(v, 'estado')
+    if (campo.tipo === 'estados') return v?.length ? v.map((e) => legible(e, 'estado')).join(', ') : '—'
     if (campo.tipo === 'destino') return catalogos.destinoServicio(registro)
     if (campo.tipo === 'mes') return v?.slice(0, 7)
     if (campo.tipo === 'fecha') return v ? new Date(`${v}T00:00:00`).toLocaleDateString('es-MX') : '—'
@@ -233,6 +236,11 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
 
       {config.serviciosFiltro && <ServiciosDelRecurso filtro={config.serviciosFiltro} id={registro.id} />}
 
+      {config.mantenible && (
+        <MantenimientosDelRecurso recurso={config.mantenible} registro={registro} usuario={usuario}
+                                  alAbrirOrden={(id) => alAbrir?.('mantenimientos', id)} />
+      )}
+
       {config.comentable && !registro.eliminado_en && (
         <Comentarios recurso={config.comentable} id={registro.id} usuario={usuario} />
       )}
@@ -246,7 +254,7 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
 }
 
 // idInicial: registro que se abre al llegar desde otra pantalla (p. ej. un edificio del Resumen)
-export function PaginaRecurso({ config, usuario, campusActivo = '', idInicial = null, alUsarIdInicial }) {
+export function PaginaRecurso({ config, usuario, campusActivo = '', idInicial = null, alUsarIdInicial, alAbrir }) {
   const catalogos = useCatalogos()
   const [filas, setFilas] = useState([])
   const [cargando, setCargando] = useState(true)
@@ -426,7 +434,7 @@ export function PaginaRecurso({ config, usuario, campusActivo = '', idInicial = 
       {seleccion && !creando && (
         <Detalle key={seleccion.id} config={config} registro={seleccion} usuario={usuario} campusActivo={campusActivo}
                  alActualizar={(nuevo) => { actualizarFila(nuevo); if (nuevo.eliminado_en && !verEliminados) cargar() }}
-                 alCerrar={() => setSeleccion(null)} />
+                 alCerrar={() => setSeleccion(null)} alAbrir={alAbrir} />
       )}
     </div>
   )

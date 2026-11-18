@@ -12,8 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from comun.app import crear_app
+from comun.config import configuracion
 from comun.db import fabrica_sesiones, get_db
 from comun.historial import registrar_evento
+from comun.propiedades import revisar_valores
 from comun.modelos import Area, Campus, Edificio, ElementoInventario, TipoElemento
 from comun.recursos import crear_router_recurso
 from comun.seguridad import SISTEMA, SOLO_ADMIN, TODOS, requiere_rol
@@ -279,41 +281,8 @@ async def _tipo_activo(db: AsyncSession, clave: str | None) -> TipoElemento | No
 
 
 def _revisar_propiedades(tipo: TipoElemento, propiedades: dict) -> tuple[dict, list[str]]:
-    """Revisa las propiedades de un elemento contra las que define su tipo.
-
-    Devuelve las propiedades sin valores vacíos y la lista de problemas encontrados.
-    Las propiedades que el tipo no define se aceptan tal cual (datos extra del Técnico).
-    """
-    limpias = {clave: valor for clave, valor in propiedades.items() if valor is not None and valor != ""}
-    errores = []
-    for definicion in tipo.propiedades_definidas:
-        clave, etiqueta, clase = definicion["clave"], definicion["etiqueta"], definicion["tipo"]
-        if clave not in limpias:
-            if definicion.get("requerida"):
-                errores.append(f"«{etiqueta}» es obligatoria en {tipo.nombre.lower()}")
-            continue
-        valor = limpias[clave]
-        if clase == "numero":
-            # bool es subclase de int en Python: true no debe pasar como número
-            if isinstance(valor, bool) or not isinstance(valor, (int, float)):
-                errores.append(f"«{etiqueta}» debe ser un número")
-            elif definicion.get("minimo") is not None and valor < definicion["minimo"]:
-                errores.append(f"«{etiqueta}» debe ser {definicion['minimo']:g} o más")
-            elif definicion.get("maximo") is not None and valor > definicion["maximo"]:
-                errores.append(f"«{etiqueta}» debe ser {definicion['maximo']:g} o menos")
-        elif clase == "opcion" and valor not in definicion["opciones"]:
-            errores.append(f"«{etiqueta}» debe ser una de: {', '.join(definicion['opciones'])}")
-        elif clase == "si_no" and not isinstance(valor, bool):
-            errores.append(f"«{etiqueta}» debe ser sí o no (true o false)")
-        elif clase == "texto" and (not isinstance(valor, str) or len(valor) > 500):
-            errores.append(f"«{etiqueta}» debe ser un texto de hasta 500 caracteres")
-        elif clase == "fecha":
-            try:
-                if date.fromisoformat(valor) > date.today():
-                    errores.append(f"«{etiqueta}» no puede ser una fecha futura")
-            except (TypeError, ValueError):
-                errores.append(f"«{etiqueta}» debe ser una fecha AAAA-MM-DD")
-    return limpias, errores
+    """Revisa las propiedades de un elemento contra las que define su tipo (reglas en comun.propiedades)."""
+    return revisar_valores(tipo.propiedades_definidas, propiedades, tipo.nombre.lower())
 
 
 async def validar_elemento(db: AsyncSession, datos: dict, existente: ElementoInventario | None) -> dict:
@@ -553,10 +522,24 @@ async def asegurar_campus_fijos() -> None:
             await db.rollback()
 
 
+def _consumidores():
+    from comun.mantenimientos import PATRONES, manejador_de_estados
+    from comun.mensajeria import consumidor
+
+    # Un mantenimiento iniciado o terminado deja el edificio, el área o el elemento en el estado que dice su plantilla
+    aplicar = manejador_de_estados("inmuebles.mantenimiento", {
+        "EDIFICIO": (Edificio, EdificioSalida, ("OPERATIVO", "EN_MANTENIMIENTO", "FUERA_DE_SERVICIO")),
+        "AREA": (Area, AreaSalida, ("OPERATIVO", "EN_MANTENIMIENTO", "FUERA_DE_SERVICIO")),
+        "INVENTARIO": (ElementoInventario, ElementoSalida, ("BUENO", "REGULAR", "MALO", "FUERA_DE_SERVICIO")),
+    })
+    return [consumidor("inmuebles.mantenimiento", PATRONES, aplicar)]
+
+
 app = crear_app(
     nombre="inmuebles",
     titulo="inmuebles-service",
     descripcion="Campus fijos (Centro y Norte), edificios, áreas (con o sin edificio) e inventario de cada área.",
     routers=[router_campus, router_edificios, router_areas, router_inventario, router_tipos, router_resumen],
     al_iniciar=asegurar_campus_fijos,
+    consumidores=_consumidores() if configuracion().rabbitmq_url else (),
 )

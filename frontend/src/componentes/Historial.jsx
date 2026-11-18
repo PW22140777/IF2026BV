@@ -5,6 +5,9 @@ import { legible } from '../recursos'
 
 const VERBOS = {
   CREAR: 'creó el registro',
+  INICIAR: 'inició el mantenimiento',
+  TERMINAR: 'terminó el mantenimiento',
+  CANCELAR: 'canceló la orden',
   MODIFICAR: 'modificó',
   ELIMINAR: 'eliminó el registro',
   RESTAURAR: 'restauró el registro',

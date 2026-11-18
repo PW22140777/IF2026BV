@@ -232,6 +232,67 @@ class Comentario(ConResponsabilidad, Base):
     propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
+# ------------------------------------------------------------ mantenimientos
+class PlantillaMantenimiento(ConResponsabilidad, Base):
+    """A qué recursos aplica un mantenimiento, cuándo se abre, qué se registra y cómo queda el recurso."""
+
+    __tablename__ = "plantillas_mantenimiento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str]
+    descripcion: Mapped[str | None]
+    recurso: Mapped[str]                     # EDIFICIO, AREA, INVENTARIO o SERVICIO
+    tipo_elemento: Mapped[str | None]        # solo inventario
+    disparo: Mapped[str]                     # ESTADO, PERIODICO o MANUAL
+    estados_disparo: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    cada_dias: Mapped[int | None]
+    estado_al_iniciar: Mapped[str | None]
+    estado_resuelto: Mapped[str]
+    estado_parcial: Mapped[str]
+    estado_no_resuelto: Mapped[str]
+    lista_verificacion: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    activa: Mapped[bool] = mapped_column(default=True)
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class OrdenMantenimiento(ConResponsabilidad, Base):
+    """Un mantenimiento concreto: Programada -> En curso -> Terminada (o Cancelada)."""
+
+    __tablename__ = "ordenes_mantenimiento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plantilla_id: Mapped[int] = mapped_column(ForeignKey("plantillas_mantenimiento.id"))
+    recurso: Mapped[str]
+    recurso_id: Mapped[int]
+    origen: Mapped[str]                      # ESTADO, PERIODICO o MANUAL
+    estado: Mapped[str] = mapped_column(default="PROGRAMADA")
+    fecha_programada: Mapped[date] = mapped_column(default=date.today)
+    iniciada_en: Mapped[datetime | None]
+    iniciada_por: Mapped[int | None]
+    terminada_en: Mapped[datetime | None]
+    terminada_por: Mapped[int | None]
+    resultado: Mapped[str | None]            # RESUELTO, PARCIAL o NO_RESUELTO
+    respuestas: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    notas: Mapped[str | None]
+    estado_recurso_nuevo: Mapped[str | None]
+    motivo_cancelacion: Mapped[str | None]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class OrdenTecnico(Base):
+    """Técnico asignado a una orden. Quitarlo marca quitado_en; la fila no se borra."""
+
+    __tablename__ = "ordenes_tecnicos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    orden_id: Mapped[int] = mapped_column(ForeignKey("ordenes_mantenimiento.id"))
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
+    asignado_en: Mapped[datetime] = mapped_column(default=ahora)
+    asignado_por: Mapped[int | None]
+    quitado_en: Mapped[datetime | None]
+    quitado_por: Mapped[int | None]
+
+
 # -------------------------------------------------------------------- audit
 class RegistroAuditoria(Base):
     __tablename__ = "audit_log"
