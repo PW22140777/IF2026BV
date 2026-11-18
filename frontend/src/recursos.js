@@ -57,6 +57,7 @@ export const RECURSOS = {
     titulo: 'Edificios',
     singular: 'edificio',
     ruta: '/edificios',
+    comentable: 'EDIFICIO',   // los Observadores pueden comentarlo
     historial: 'edificio',
     serviciosFiltro: 'edificio_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => `${r.nombre} (${r.clave})`,
@@ -81,6 +82,7 @@ export const RECURSOS = {
     titulo: 'Áreas',
     singular: 'área',
     ruta: '/areas',
+    comentable: 'AREA',
     historial: 'area',
     serviciosFiltro: 'area_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => r.nombre,
@@ -106,6 +108,7 @@ export const RECURSOS = {
     titulo: 'Inventario',
     singular: 'elemento',
     ruta: '/inventario',
+    comentable: 'INVENTARIO',
     historial: 'inventario',
     nombre: (r) => `${legible(r.tipo)}${r.marca ? ' ' + r.marca : ''}`,
     columnas: [
@@ -172,6 +175,7 @@ export const RECURSOS = {
     titulo: 'Agua y luz',
     singular: 'servicio',
     ruta: '/servicios',
+    comentable: 'SERVICIO',
     historial: 'servicio',
     nombre: (r) => r.nombre,
     columnas: [
@@ -199,6 +203,7 @@ export const RECURSOS = {
     titulo: 'Consumos',
     singular: 'consumo',
     ruta: '/consumos',
+    comentable: 'CONSUMO',
     historial: 'consumo',
     nombre: (r) => `Consumo de ${r.periodo?.slice(0, 7)}`,
     cantidadConUnidad: true,

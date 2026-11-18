@@ -41,7 +41,7 @@ class Usuario(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nombre: Mapped[str]
     email: Mapped[str]
-    hash_contrasena: Mapped[str]
+    hash_contrasena: Mapped[str | None]   # None en un Observador: entra solo con Microsoft
     rol: Mapped[str]
     activo: Mapped[bool] = mapped_column(default=True)
     debe_cambiar_contrasena: Mapped[bool] = mapped_column(default=False)   # tiene una contraseña temporal
@@ -49,6 +49,8 @@ class Usuario(Base):
     creado_por: Mapped[int | None]
     modificado_en: Mapped[datetime | None]
     modificado_por: Mapped[int | None]
+    proveedor_oauth: Mapped[str | None]   # p. ej. "microsoft"
+    sujeto_oauth: Mapped[str | None]      # identificador estable de la persona en ese proveedor
 
 
 class Sesion(Base):
@@ -64,6 +66,18 @@ class Sesion(Base):
     revocada_en: Mapped[datetime | None]
     motivo_revocacion: Mapped[str | None]
     ip: Mapped[str | None]
+
+
+class OauthCanje(Base):
+    """Código de un solo uso que el navegador cambia por el JWT tras entrar con Microsoft."""
+
+    __tablename__ = "oauth_canjes"
+
+    hash_codigo: Mapped[str] = mapped_column(primary_key=True)   # SHA-256 del código, nunca el código
+    sesion_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("sesiones.id"))
+    creado_en: Mapped[datetime] = mapped_column(default=ahora)
+    expira_en: Mapped[datetime]
+    usado_en: Mapped[datetime | None]
 
 
 # ---------------------------------------------------------------- inmuebles
@@ -202,6 +216,20 @@ class EventoProcesado(Base):
     consumidor: Mapped[str] = mapped_column(primary_key=True)
     evento_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     procesado_en: Mapped[datetime] = mapped_column(default=ahora)
+
+
+# -------------------------------------------------------------- comentarios
+class Comentario(ConResponsabilidad, Base):
+    """Comentario de un Observador sobre un recurso, o la respuesta de un Técnico o Administrador."""
+
+    __tablename__ = "comentarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO, SERVICIO o CONSUMO
+    recurso_id: Mapped[int]
+    respuesta_a: Mapped[int | None] = mapped_column(ForeignKey("comentarios.id"))
+    texto: Mapped[str]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
 # -------------------------------------------------------------------- audit

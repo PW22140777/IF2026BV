@@ -1,2 +1,4 @@
 # Dependencias propias de auth-service (las comunes vienen del paquete shared)
 bcrypt>=4.1
+# Validar la firma RS256 del id_token de Microsoft (PyJWT la usa a través de cryptography)
+cryptography>=42

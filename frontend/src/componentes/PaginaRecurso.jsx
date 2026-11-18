@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useCatalogos } from '../catalogos'
 import { legible } from '../recursos'
 import { resumenDefiniciones } from './EditorDefiniciones'
+import { Comentarios } from './Comentarios'
 import { Formulario } from './Formulario'
 import { Historial } from './Historial'
 
@@ -120,7 +121,8 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
   const [version, setVersion] = useState(0)        // fuerza recargar el historial
-  const puedeEditar = usuario.rol !== 'CONSULTA' && !registro.eliminado_en
+  // Solo el Administrador y el Técnico modifican; Consulta y Observador leen
+  const puedeEditar = ['ADMINISTRADOR', 'TECNICO'].includes(usuario.rol) && !registro.eliminado_en
   const esAdmin = usuario.rol === 'ADMINISTRADOR'
   const ruta = `${config.ruta}/${registro.id}`
 
@@ -231,6 +233,10 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
 
       {config.serviciosFiltro && <ServiciosDelRecurso filtro={config.serviciosFiltro} id={registro.id} />}
 
+      {config.comentable && !registro.eliminado_en && (
+        <Comentarios recurso={config.comentable} id={registro.id} usuario={usuario} />
+      )}
+
       <section className="seccion-detalle">
         <h4>Historial</h4>
         <Historial recurso={config.historial} id={registro.id} version={version} />
@@ -249,7 +255,7 @@ export function PaginaRecurso({ config, usuario, campusActivo = '', idInicial = 
   const [creando, setCreando] = useState(false)
   const [filtros, setFiltros] = useState({})
   const [verEliminados, setVerEliminados] = useState(false)
-  const puedeCrear = usuario.rol !== 'CONSULTA'
+  const puedeCrear = ['ADMINISTRADOR', 'TECNICO'].includes(usuario.rol)
   const esAdmin = usuario.rol === 'ADMINISTRADOR'
 
   const cargar = useCallback(async () => {

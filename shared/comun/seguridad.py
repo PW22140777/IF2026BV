@@ -23,8 +23,9 @@ from .modelos import Sesion, Usuario
 ADMINISTRADOR = "ADMINISTRADOR"   # control completo y auditoría
 TECNICO = "TECNICO"               # crea, modifica y elimina recursos
 CONSULTA = "CONSULTA"             # solo visualiza
+OBSERVADOR = "OBSERVADOR"         # visualiza y comenta; entra solo con su cuenta institucional
 
-ROLES = (ADMINISTRADOR, TECNICO, CONSULTA)
+ROLES = (ADMINISTRADOR, TECNICO, CONSULTA, OBSERVADOR)
 TODOS = ROLES
 EDITORES = (ADMINISTRADOR, TECNICO)
 SOLO_ADMIN = (ADMINISTRADOR,)

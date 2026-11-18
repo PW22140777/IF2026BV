@@ -4,20 +4,22 @@ import { ProveedorCatalogos, useCatalogos } from './catalogos'
 import { Auditoria } from './componentes/Auditoria'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
+import { BotonCuentaInstitucional, Registro } from './componentes/Registro'
 import { Resumen } from './componentes/Resumen'
 import { Usuarios } from './componentes/Usuarios'
 import { RECURSOS } from './recursos'
 
-const NOMBRES_ROL = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico', CONSULTA: 'Consulta' }
+const NOMBRES_ROL = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico', CONSULTA: 'Consulta', OBSERVADOR: 'Observador' }
+const LECTORES = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA', 'OBSERVADOR']
 
 // Menú: qué ve cada rol
 const SECCIONES = [
-  { id: 'resumen', titulo: 'Resumen', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'] },
-  { id: 'edificios', titulo: 'Edificios', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'areas', titulo: 'Áreas', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'inventario', titulo: 'Inventario', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'servicios', titulo: 'Agua y luz', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Servicios básicos' },
-  { id: 'consumos', titulo: 'Consumos', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Servicios básicos' },
+  { id: 'resumen', titulo: 'Resumen', roles: LECTORES },
+  { id: 'edificios', titulo: 'Edificios', roles: LECTORES, grupo: 'Inmuebles' },
+  { id: 'areas', titulo: 'Áreas', roles: LECTORES, grupo: 'Inmuebles' },
+  { id: 'inventario', titulo: 'Inventario', roles: LECTORES, grupo: 'Inmuebles' },
+  { id: 'servicios', titulo: 'Agua y luz', roles: LECTORES, grupo: 'Servicios básicos' },
+  { id: 'consumos', titulo: 'Consumos', roles: LECTORES, grupo: 'Servicios básicos' },
   { id: 'tipos_elemento', titulo: 'Tipos de elemento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'auditoria', titulo: 'Auditoría', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'usuarios', titulo: 'Usuarios', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
@@ -83,6 +85,11 @@ function Login({ alEntrar, mensaje }) {
         <button type="submit" className="boton-principal boton-ancho" disabled={enviando}>
           {enviando ? 'Entrando…' : 'Iniciar sesión'}
         </button>
+        <div className="separador-login"><span>¿Eres Observador?</span></div>
+        <BotonCuentaInstitucional texto="Entrar con tu cuenta institucional" />
+        <p className="nota-registro">
+          Si es tu primera vez, <a href="/registro">conoce cómo registrarte</a>.
+        </p>
       </form>
     </main>
   )
@@ -95,6 +102,8 @@ export default function App() {
   const [mensajeLogin, setMensajeLogin] = useState('')
   const [campusActivo, setCampusActivo] = useState(leerCampusGuardado)
   const [idInicial, setIdInicial] = useState(null)   // registro a abrir al cambiar de sección
+  // /registro y /registro/listo: página de los Observadores (entran con su cuenta institucional)
+  const [enRegistro, setEnRegistro] = useState(() => window.location.pathname.startsWith('/registro'))
   const usarIdInicial = useCallback(() => setIdInicial(null), [])
 
   // Desde el Resumen: ir a una sección con un registro ya abierto
@@ -117,6 +126,10 @@ export default function App() {
     alActualizarSesion(setSesion)
   }, [])
 
+  if (!sesion && enRegistro) {
+    return <Registro alEntrar={(s) => { setEnRegistro(false); setSeccion('resumen'); setSesion(s) }}
+                     alIrAlInicio={() => { window.history.replaceState(null, '', '/'); setEnRegistro(false) }} />
+  }
   if (!sesion) {
     return <Login mensaje={mensajeLogin} alEntrar={(s) => { setMensajeLogin(''); setSeccion('resumen'); setSesion(s) }} />
   }
@@ -171,10 +184,12 @@ export default function App() {
           <div className="sesion">
             <p><strong>{usuario.nombre}</strong><br /><span className="tenue">{NOMBRES_ROL[usuario.rol]}</span></p>
             {usuario.rol === 'CONSULTA' && <p className="tenue nota-rol">Tu rol es de solo lectura.</p>}
-            <button type="button" className="boton-secundario" aria-current={seccion === 'contrasena' ? 'page' : undefined}
+            {usuario.rol === 'OBSERVADOR' && <p className="tenue nota-rol">Puedes consultar y comentar los recursos.</p>}
+            {/* Un Observador entra con Microsoft: no tiene contraseña que cambiar */}
+            {usuario.rol !== 'OBSERVADOR' && <button type="button" className="boton-secundario" aria-current={seccion === 'contrasena' ? 'page' : undefined}
                     onClick={() => { setSeccion('contrasena'); setMenuAbierto(false) }}>
               Cambiar contraseña
-            </button>
+            </button>}
             <button type="button" className="boton-secundario" onClick={() => { salir(); setSesion(null) }}>
               Cerrar sesión
             </button>

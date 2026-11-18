@@ -73,7 +73,7 @@ export function Usuarios({ usuario: yo }) {
         <div className="tabla-contenedor">
 
         <table className="tabla">
-          <thead><tr><th scope="col">Nombre</th><th scope="col">Correo</th><th scope="col">Rol</th><th scope="col">Cuenta</th></tr></thead>
+          <thead><tr><th scope="col">Nombre</th><th scope="col">Correo</th><th scope="col">Rol</th><th scope="col">Acceso</th><th scope="col">Cuenta</th></tr></thead>
           <tbody>
             {usuarios.map((u) => (
               <tr key={u.id} className={u.activo ? '' : 'eliminada'}>
@@ -83,11 +83,15 @@ export function Usuarios({ usuario: yo }) {
                 </td>
                 <td data-etiqueta="Correo">{u.email}</td>
                 <td data-etiqueta="Rol">
-                  <select aria-label={`Rol de ${u.nombre}`} value={u.rol} disabled={u.id === yo.id}
-                          onChange={(e) => modificar(u.id, { rol: e.target.value }, `${u.nombre} ahora tiene el rol ${e.target.value.toLowerCase()}.`)}>
-                    {ROLES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
-                  </select>
+                  {/* El rol Observador solo se obtiene registrándose con la cuenta institucional */}
+                  {u.rol === 'OBSERVADOR' ? 'Observador' : (
+                    <select aria-label={`Rol de ${u.nombre}`} value={u.rol} disabled={u.id === yo.id}
+                            onChange={(e) => modificar(u.id, { rol: e.target.value }, `${u.nombre} ahora tiene el rol ${e.target.value.toLowerCase()}.`)}>
+                      {ROLES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                    </select>
+                  )}
                 </td>
+                <td data-etiqueta="Acceso">{u.proveedor_oauth ? 'Cuenta institucional' : 'Contraseña'}</td>
                 <td data-etiqueta="Cuenta">
                   {u.id === yo.id ? <span className="tenue">Tu cuenta</span> : (
                     <div className="acciones">
@@ -95,10 +99,10 @@ export function Usuarios({ usuario: yo }) {
                               onClick={() => modificar(u.id, { activo: !u.activo }, `${u.nombre} ${u.activo ? 'ya no puede' : 'puede'} iniciar sesión.`)}>
                         {u.activo ? 'Desactivar' : 'Activar'}
                       </button>
-                      <button type="button" className="boton-secundario"
+                      {!u.proveedor_oauth && <button type="button" className="boton-secundario"
                               onClick={() => { setRestablecer(u); setTemporal(''); setError('') }}>
                         Restablecer contraseña
-                      </button>
+                      </button>}
                     </div>
                   )}
                 </td>

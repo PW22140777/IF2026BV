@@ -15,6 +15,7 @@ Campus
 | Administrador | Todo, más ver la auditoría completa, verificar su integridad, restaurar registros eliminados y administrar usuarios |
 | Técnico | Crear, modificar y eliminar recursos y sus propiedades |
 | Consulta | Solo ver recursos, historial y el resumen para tomar decisiones |
+| Observador | Ver lo mismo que Consulta y comentar los recursos; se registra solo, con su cuenta institucional de Microsoft |
 
 ## Arrancar el sistema
 
@@ -147,6 +148,37 @@ Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_c
 - El estado de un servicio (operando, con falla, suspendido, en mantenimiento) se actualiza como cualquier otro campo y queda en su historial; `/resumen/servicios` lista los que no están operando con normalidad.
 - No se puede eliminar un campus con edificios o áreas activos. Al eliminarlo, sus servicios generales quedan inactivos automáticamente (evento por RabbitMQ). Para restaurar un edificio o un área, su campus debe estar activo.
 - Todas las listas, el resumen y las rutas de la API aceptan `?campus_id=` para filtrar.
+
+## Observadores: registro con cuenta institucional y comentarios
+
+El rol **Observador** es para personas de la comunidad que quieren dar seguimiento a los inmuebles y reportar lo que ven. No lo crea el Administrador: cada quien se registra en **/registro** con su cuenta institucional de Microsoft (`@queretaro.tecnm.mx`) y no tiene contraseña.
+
+| Quién | En los comentarios puede |
+| --- | --- |
+| Observador | Leer, escribir comentarios en edificios, áreas, inventario, servicios y consumos, y responder dentro de un hilo |
+| Técnico, Administrador | Leer y responder (opcional); no abren comentarios nuevos |
+| Administrador | Además, ocultar un comentario con motivo (borrado lógico: el texto queda en el historial) |
+| Consulta | Solo leer |
+
+**Cómo entra un Observador** (OpenID Connect con código de autorización + PKCE, `services/auth/app/oauth.py`):
+
+1. `/registro` → «Continuar con tu cuenta institucional» → `GET /api/v1/auth/oauth/inicio`, que guarda `state`, `nonce` y el verificador PKCE en una cookie firmada y redirige a Microsoft.
+2. Microsoft regresa a `/api/v1/auth/oauth/callback`. auth-service cambia el código por un `id_token` y comprueba firma (llaves públicas de Microsoft), emisor, audiencia, vigencia, inquilino (`tid`), `nonce` y que el correo sea de un dominio de `DOMINIOS_INSTITUCIONALES`.
+3. La primera vez crea la cuenta con rol `OBSERVADOR`; abre la sesión como cualquier otra y redirige a `/registro/listo#codigo=…`. El frontend cambia ese código de un solo uso (60 s) por el JWT con `POST /api/v1/auth/oauth/canjear`, así el token nunca viaja en una URL.
+
+Reglas: un correo que ya tiene cuenta con contraseña no puede entrar por Microsoft; un Observador no puede entrar con contraseña; el Administrador no le cambia el rol ni le asigna contraseña, pero sí puede desactivarlo.
+
+**Configurar Microsoft Entra ID** (lo hace quien administra la aplicación, con su cuenta institucional):
+
+1. En https://entra.microsoft.com → Identidad → Aplicaciones → Registros de aplicaciones → Nuevo registro. Tipo de cuenta: «solo cuentas de este directorio organizativo». URI de redirección (Web): `http://localhost:8080/api/v1/auth/oauth/callback`.
+2. En «Certificados y secretos», crea un secreto de cliente y copia su **valor**.
+3. En `.env`: `OAUTH_INQUILINO` = Id. de directorio (inquilino), `OAUTH_CLIENTE_ID` = Id. de aplicación (cliente), `OAUTH_CLIENTE_SECRETO` = el valor del secreto. Reinicia `auth`.
+
+**Comentarios** (`comentarios-service`, `/api/v1/comentarios`): `GET ?recurso=EDIFICIO&recurso_id=7` (todos), `POST` (Observador; Técnico y Administrador solo con `respuesta_a`), `DELETE /{id}` con `{"motivo"}` (Administrador). Valida que el recurso exista y esté activo, permite un nivel de respuestas y limita a 10 comentarios por minuto por persona. Cada comentario y cada ocultamiento quedan en el historial firmado (`COMENTARIO`).
+
+**Pruebas sin Microsoft:** con `OAUTH_MODO_PRUEBA=true` (solo base local) `GET /api/v1/auth/oauth/inicio?correo_prueba=ana@queretaro.tecnm.mx` entra sin pasar por Microsoft, con las mismas reglas de dominio; lo usa `tests/prueba_sistema.py`. `tests/test_oauth.py` prueba la validación del `id_token` con una llave RSA de prueba. **Nunca lo actives en una base con datos reales.**
+
+**Base que ya existe:** aplica `db/migraciones/007_observadores_y_comentarios.sql` como dueño de la base, con `-v pass_comentarios=…` (la contraseña de `DB_PASS_COMENTARIOS`).
 
 ## Tipos de elemento y sus propiedades
 

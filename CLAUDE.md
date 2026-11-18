@@ -22,6 +22,7 @@ Roles:
 | `ADMINISTRADOR` | Todo, más auditoría completa, verificar integridad, restaurar eliminados y administrar usuarios |
 | `TECNICO` | Crear, modificar y eliminar recursos y sus propiedades, registrar consumos |
 | `CONSULTA` | Solo ver recursos, historial y resumen |
+| `OBSERVADOR` | Ver como Consulta y comentar recursos. Se registra solo en `/registro` con Microsoft Entra ID (dominio `queretaro.tecnm.mx`); no tiene contraseña |
 
 ## Reglas de negocio (no romperlas)
 
@@ -33,12 +34,14 @@ Roles:
 - **Restaurar:** el padre (campus, edificio o área) debe estar activo.
 - **Propiedades flexibles:** cada recurso tiene una columna `propiedades` (JSONB) para datos según el tipo, p. ej. `{"btu": 12000}`. Se agregan, cambian o quitan con `PUT` y `DELETE /{recurso}/{id}/propiedades/{clave}`, y cada cambio queda en el historial.
 - **Tipos de elemento:** el tipo de un elemento de inventario debe existir en `tipos_elemento`, que define sus propiedades (`propiedades_definidas`: clave, etiqueta, tipo texto/numero/opcion/fecha/si_no, límites, opciones, requerida) y si usa medidas. `validar_elemento` revisa las propiedades al crear, modificar o cambiar una sola. Solo el Administrador cambia el catálogo (`roles_edicion=SOLO_ADMIN` en `crear_router_recurso`); la clave no cambia y no se elimina un tipo con elementos activos.
+- **Observadores y comentarios:** el rol `OBSERVADOR` solo se obtiene entrando con la cuenta institucional (`services/auth/app/oauth.py`: código + PKCE, `id_token` validado contra Microsoft, inquilino y dominio). Un correo con contraseña no entra por OAuth y un Observador no entra con contraseña. `comentarios-service` guarda los comentarios: los abre un Observador; Técnico y Administrador solo responden (`respuesta_a`); solo el Administrador oculta, con motivo (borrado lógico). `OAUTH_MODO_PRUEBA=true` es solo para pruebas en base local.
 - **Auditoría:** `audit_log` es de solo agregar (triggers bloquean `UPDATE`, `DELETE` y `TRUNCATE`). Cada registro tiene `hash = SHA-256(hash_anterior + JSON canónico)` y firma Ed25519. Solo `audit-service` escribe ahí.
 
 ## Arquitectura
 
 ```text
-Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / audit ──> PostgreSQL (una sola base)
+Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / audit ──> PostgreSQL (una sola base)
+                 │                     └── auth ⇄ Microsoft Entra ID (registro de Observadores)
                  └── frontend (Nginx)              └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                        └────> servicios (reacciones)
 Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con correlation_id
@@ -50,6 +53,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/auth/` | Login con JWT, usuarios y roles. Crea los usuarios de demostración si la tabla está vacía. |
 | `services/inmuebles/` | Campus, edificios, áreas, inventario y el catálogo `/tipos-elemento`, y `/resumen/inmuebles`. |
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
+| `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario, servicios y consumos; respuestas y moderación. |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |
 | `shared/comun/` | Paquete común instalado en cada imagen (ver abajo). |
 | `frontend/` | React + Vite. Selector global «Campus con el que trabajas» que filtra todas las pantallas. |
@@ -72,6 +76,8 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 Python 3.12, FastAPI, SQLAlchemy 2 asíncrono con `psycopg` 3, Pydantic 2, PyJWT, `bcrypt` (directo, no `passlib`), `aio-pika`, `httpx`, structlog, OpenTelemetry, `prometheus-fastapi-instrumentator`, `cryptography`; PostgreSQL 16, RabbitMQ 3.13, Consul 1.20, Jaeger, Prometheus, Grafana; React 18 + Vite 5 con fuente Public Sans.
 
 ## Ejecutar y probar
+
+Esta copia (`IF2026BV`) trabaja con la **base local** (`COMPOSE_PROFILES=local-db` y `COMPOSE_PROJECT_NAME=infraestructura-fisica-bv` en `.env`), nunca con la de Supabase del equipo.
 
 ```bash
 cp .env.example .env

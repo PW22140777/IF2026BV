@@ -12,15 +12,22 @@ CREATE TABLE usuarios (
     nombre           TEXT NOT NULL,
     -- Siempre en minúsculas: así UNIQUE también impide «Ana@...» y «ana@...»
     email            TEXT NOT NULL UNIQUE CONSTRAINT usuarios_email_minusculas CHECK (email = lower(email)),
-    hash_contrasena  TEXT NOT NULL,
-    rol              TEXT NOT NULL CHECK (rol IN ('ADMINISTRADOR', 'TECNICO', 'CONSULTA')),
+    hash_contrasena  TEXT,                 -- NULL en un Observador: entra solo con Microsoft
+    rol              TEXT NOT NULL CONSTRAINT usuarios_rol_check
+                     CHECK (rol IN ('ADMINISTRADOR', 'TECNICO', 'CONSULTA', 'OBSERVADOR')),
     activo           BOOLEAN NOT NULL DEFAULT true,
     -- true = contraseña temporal (cuenta nueva o restablecida): solo puede cambiarla
     debe_cambiar_contrasena  BOOLEAN NOT NULL DEFAULT false,
     creado_en        TIMESTAMPTZ NOT NULL DEFAULT now(),
     creado_por       INTEGER,
     modificado_en    TIMESTAMPTZ,
-    modificado_por   INTEGER
+    modificado_por   INTEGER,
+    -- Cuenta externa con la que entra (Observador): proveedor + identificador estable de la persona
+    proveedor_oauth  TEXT,
+    sujeto_oauth     TEXT,
+    CONSTRAINT usuarios_oauth_unico UNIQUE (proveedor_oauth, sujeto_oauth),
+    -- Toda cuenta tiene una forma de entrar: contraseña o cuenta externa
+    CONSTRAINT usuarios_con_acceso CHECK (hash_contrasena IS NOT NULL OR sujeto_oauth IS NOT NULL)
 );
 
 -- Sesiones iniciadas (dueño: auth-service). Los demás servicios las leen en
@@ -37,6 +44,17 @@ CREATE TABLE sesiones (
     ip                 TEXT
 );
 CREATE INDEX sesiones_abiertas ON sesiones (usuario_id) WHERE revocada_en IS NULL;
+
+-- Códigos de un solo uso para entregar la sesión tras entrar con Microsoft (dueño: auth-service).
+-- El navegador recibe el código en la URL y lo cambia por el JWT con POST /auth/oauth/canjear:
+-- así el token nunca viaja en una URL. Se guarda el hash del código, no el código.
+CREATE TABLE oauth_canjes (
+    hash_codigo   TEXT PRIMARY KEY,
+    sesion_id     UUID NOT NULL REFERENCES sesiones (id),
+    creado_en     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expira_en     TIMESTAMPTZ NOT NULL,
+    usado_en      TIMESTAMPTZ
+);
 
 -- ---------------------------------------------------------------------
 -- Recursos inmobiliarios (dueño: inmuebles-service)
@@ -313,6 +331,30 @@ CREATE TABLE consumos (
     motivo_eliminacion  TEXT
 );
 CREATE UNIQUE INDEX consumos_periodo_activo ON consumos (servicio_id, periodo) WHERE eliminado_en IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Comentarios sobre los recursos (dueño: comentarios-service)
+-- Los escribe un Observador; el Técnico y el Administrador pueden responder
+-- (respuesta_a). Solo el Administrador los oculta: borrado lógico con motivo.
+-- ---------------------------------------------------------------------
+CREATE TABLE comentarios (
+    id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    recurso             TEXT NOT NULL
+                        CONSTRAINT comentarios_recurso_valido
+                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'SERVICIO', 'CONSUMO')),
+    recurso_id          INTEGER NOT NULL,
+    respuesta_a         INTEGER REFERENCES comentarios (id),   -- NULL = comentario nuevo; si no, responde a ese
+    texto               TEXT NOT NULL CONSTRAINT comentarios_texto_valido CHECK (length(btrim(texto)) BETWEEN 1 AND 2000),
+    propiedades         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por          INTEGER NOT NULL REFERENCES usuarios (id),
+    modificado_en       TIMESTAMPTZ,
+    modificado_por      INTEGER,
+    eliminado_en        TIMESTAMPTZ,
+    eliminado_por       INTEGER,
+    motivo_eliminacion  TEXT
+);
+CREATE INDEX comentarios_por_recurso ON comentarios (recurso, recurso_id) WHERE eliminado_en IS NULL;
 
 -- ---------------------------------------------------------------------
 -- Mensajería confiable
