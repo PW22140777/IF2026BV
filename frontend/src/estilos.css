@@ -15,6 +15,7 @@
   --foco: #1f5f99;
 
   --radio: 6px;
+  --alto-barra: 3.5rem;   /* barra superior; el panel de detalle se acomoda debajo */
   --fuente: 'Public Sans', system-ui, sans-serif;
   color-scheme: light;
 }
@@ -133,10 +134,47 @@ textarea { resize: vertical; }
 .marca { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; }
 .logotipo-chico { width: 28px; height: 28px; flex: none; }
 .boton-menu { display: none; margin-left: auto; background: none; color: inherit; border: 1px solid #4a5a66; border-radius: var(--radio); padding: 0.3rem 0.6rem; }
-.selector-campus { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: #9fb0bc; }
-.selector-campus select { background: #2a3b48; color: #fff; border-color: #4a5a66; font-weight: 600; }
-.menu:not(.abierto) .selector-campus { display: none; }
-@media (min-width: 761px) { .menu:not(.abierto) .selector-campus { display: flex; } }
+/* Barra superior: campus con el que se trabaja y menú del usuario, siempre a la vista */
+.columna-principal { display: flex; flex-direction: column; min-width: 0; }
+.barra-superior {
+  position: sticky; top: 0; z-index: 15;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  min-height: var(--alto-barra); padding: 0.4rem 2.25rem; background: var(--superficie); border-bottom: 1px solid var(--linea);
+}
+.selector-campus { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; color: var(--grafito); min-width: 0; }
+.selector-campus select { width: auto; max-width: 16rem; font-weight: 600; }
+.menu-usuario { position: relative; flex: none; }
+.boton-usuario {
+  display: flex; align-items: center; gap: 0.6rem; background: none; border: 1px solid transparent;
+  border-radius: var(--radio); padding: 0.25rem 0.5rem; color: var(--tinta); text-align: left;
+}
+.boton-usuario:hover, .boton-usuario[aria-expanded='true'] { border-color: var(--linea); background: var(--papel); }
+.avatar {
+  width: 2rem; height: 2rem; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--tinta); color: #fff; font-size: 0.8rem; font-weight: 700;
+}
+.usuario-texto { display: flex; flex-direction: column; line-height: 1.2; font-size: 0.85rem; }
+.usuario-texto span { color: var(--grafito); font-size: 0.78rem; }
+.opciones-usuario {
+  position: absolute; right: 0; top: calc(100% + 0.35rem); z-index: 30; min-width: 15rem;
+  background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio);
+  box-shadow: 0 6px 18px rgb(29 43 54 / 12%); padding: 0.35rem; display: flex; flex-direction: column;
+}
+.opciones-cabecera { display: flex; flex-direction: column; padding: 0.5rem 0.6rem 0.6rem; border-bottom: 1px solid var(--linea-suave); margin-bottom: 0.3rem; }
+.opciones-cabecera span { color: var(--grafito); font-size: 0.82rem; overflow-wrap: anywhere; }
+.opciones-usuario button { background: none; border: 0; text-align: left; padding: 0.55rem 0.6rem; border-radius: var(--radio); color: var(--tinta); }
+.opciones-usuario button:hover, .opciones-usuario button:focus-visible { background: var(--papel); }
+.opciones-usuario .opcion-salir { color: var(--peligro); border-top: 1px solid var(--linea-suave); border-radius: 0 0 var(--radio) var(--radio); margin-top: 0.3rem; }
+
+/* Página «Mi perfil» */
+.perfil { max-width: 46rem; }
+.tarjeta-perfil { background: var(--superficie); border: 1px solid var(--linea); border-radius: var(--radio); padding: 1.1rem 1.25rem; margin-top: 1rem; }
+.tarjeta-perfil h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.tarjeta-perfil .ficha { margin-top: 0.5rem; grid-template-columns: 9rem 1fr; }
+.lista-permisos { margin: 0; padding-left: 1.2rem; }
+.lista-sesiones { list-style: none; margin: 0; padding: 0; }
+.lista-sesiones li { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.45rem 0; border-bottom: 1px solid var(--linea-suave); }
+.etiqueta { font-size: 0.75rem; font-weight: 600; background: #e9f4ee; color: var(--bien); border-radius: 999px; padding: 0.1rem 0.55rem; white-space: nowrap; }
 .titulo-grupo {
   /* Título de grupo: botón que abre o cierra sus opciones (acordeón) */
   display: flex; align-items: center; justify-content: space-between; width: 100%;
@@ -162,12 +200,10 @@ textarea { resize: vertical; }
 }
 .menu li button:hover { background: #2a3b48; }
 .menu li button[aria-current='page'] { background: #2a3b48; border-left-color: var(--senal); font-weight: 600; }
-.sesion { margin-top: auto; font-size: 0.9rem; }
-.sesion p { margin: 0 0 0.5rem; }
-.sesion .tenue { color: #9fb0bc; }
-.nota-rol { font-size: 0.82rem; }
 
-.principal { min-width: 0; }
+
+.principal { min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.principal > .pagina { flex: 1; min-height: 0; }   /* la página llena lo que deja la barra superior */
 
 /* ------------------------------------------------------------------ páginas */
 .pagina { display: grid; grid-template-columns: 1fr; min-height: 100vh; }
@@ -217,8 +253,8 @@ textarea { resize: vertical; }
   border-left: 1px solid var(--linea);
   padding: 1.5rem;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: var(--alto-barra);   /* queda debajo de la barra superior */
+  height: calc(100vh - var(--alto-barra));
   overflow-y: auto;
 }
 .detalle-encabezado { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
@@ -421,6 +457,7 @@ textarea { resize: vertical; }
 @media (min-width: 761px) and (max-width: 1100px) {
   .aplicacion { grid-template-columns: 200px 1fr; }
   .contenido { padding: 1.5rem; }
+  .barra-superior { padding: 0.4rem 1.5rem; }
 }
 
 /* Tableta vertical y teléfono: las tablas se convierten en tarjetas, una por fila,
@@ -464,7 +501,14 @@ textarea { resize: vertical; }
   .aplicacion { grid-template-columns: 1fr; }
   .menu { position: sticky; top: 0; z-index: 20; height: auto; max-height: 100vh; overflow-y: auto; gap: 0.75rem; padding: 0.75rem 1rem; }
   .boton-menu { display: block; min-height: 2.5rem; }
-  .menu:not(.abierto) .grupo-menu, .menu:not(.abierto) .sesion { display: none; }
+  .menu:not(.abierto) .grupo-menu { display: none; }
+  /* En el teléfono la barra del menú ya va fija arriba: esta barra se desplaza con la página */
+  .barra-superior { position: static; padding: 0.5rem 1rem; }
+  .selector-campus label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .selector-campus select { max-width: none; flex: 1; }
+  .selector-campus { flex: 1; }
+  .usuario-texto, .boton-usuario .grupo-flecha { display: none; }
+  .tarjeta-perfil .ficha { grid-template-columns: 1fr; }
   .menu li button { min-height: 2.75rem; }   /* área de toque cómoda para el dedo */
 
   .contenido { padding: 1rem; }

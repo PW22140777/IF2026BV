@@ -377,6 +377,17 @@ def probar_usuarios_y_sesiones(adm, tec, con):
     assert r.status_code == 401 and "se cerró" in r.json()["detail"], r.text
     paso("después de cerrar sesión, el mismo token ya no sirve")
 
+    computadora, telefono = login("tecnico@escuela.mx", "Tecnico12345"), login("tecnico@escuela.mx", "Tecnico12345")
+    perfil = cliente.get("/api/v1/auth/perfil", headers=telefono).json()
+    assert perfil["email"] == "tecnico@escuela.mx" and perfil["acceso"] == "contrasena", perfil
+    assert len(perfil["sesiones"]) >= 2 and sum(s["actual"] for s in perfil["sesiones"]) == 1, perfil
+    assert "id" not in perfil["sesiones"][0]
+    r = cliente.post("/api/v1/auth/cerrar-otras-sesiones", headers=telefono)
+    assert r.status_code == 200 and r.json()["cerradas"] >= 1, r.text
+    assert cliente.get("/api/v1/campus", headers=computadora).status_code == 401
+    assert cliente.get("/api/v1/campus", headers=telefono).status_code == 200
+    paso("el perfil lista las sesiones abiertas y «cerrar las demás» deja abierta solo la actual")
+
 
 if __name__ == "__main__":
     main()

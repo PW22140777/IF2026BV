@@ -68,7 +68,7 @@ Para borrar todo y empezar de cero (base de datos, colas y llave de firma): `doc
 
 ## Recorrido sugerido para la presentación
 
-1. Entra como **Técnico**. Los campus son fijos (Campus Centro y Campus Norte): elige «Campus Centro» en el selector «Campus con el que trabajas» del menú y desde ese momento todas las pantallas muestran solo lo de ese campus. Crea el edificio `ED-A` con 2 niveles, el área «Laboratorio 3» en su piso 1 (la lista de pisos solo ofrece los que existen) y el área «Cancha» sin edificio.
+1. Entra como **Técnico**. Los campus son fijos (Campus Centro y Campus Norte): elige «Campus Centro» en el selector «Campus con el que trabajas» de la barra superior y desde ese momento todas las pantallas muestran solo lo de ese campus. Crea el edificio `ED-A` con 2 niveles, el área «Laboratorio 3» en su piso 1 (la lista de pisos solo ofrece los que existen) y el área «Cancha» sin edificio.
 2. En **Inventario**, agrega un aire acondicionado al laboratorio: al elegir el tipo aparecen sus propiedades y la capacidad (`12000` BTU) es obligatoria. Luego cambia su estado a «Fuera de servicio». En el panel de la derecha, el **Historial** muestra quién cambió qué. Como Administrador, en **Tipos de elemento** puedes ver o cambiar qué propiedades pide cada tipo.
 3. En **Agua y luz**, crea una toma de agua para la cancha. Cambia su estado a «Con falla»: en **Resumen** (o filtrando por estado) aparece como servicio con falla. Luego elimina la cancha indicando un motivo: unos segundos después la toma aparece como inactiva. Ese cambio lo hizo `servicios-service` al recibir el evento por RabbitMQ (puedes verlo en http://localhost:15672).
 4. Entra como **Consulta**: puede ver todo y el resumen, pero no hay botones para modificar. Si intentas la API directamente, responde `403`.
@@ -126,6 +126,8 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON
 
 - Un cambio de rol aplica en la siguiente petición, y desactivar una cuenta cierra sus sesiones al instante.
 - «Cerrar sesión» invalida el token en el servidor, aunque alguien lo haya copiado.
+- En «Mi perfil» (GET /auth/perfil) cada quien ve sus datos, lo que puede hacer su rol, cómo entra y sus sesiones abiertas, y puede cerrar las demás con POST /auth/cerrar-otras-sesiones (la actual sigue abierta).
+- «Mi perfil», «Cambiar contraseña» y «Cerrar sesión» están en el menú del usuario, a la derecha de la barra superior; ahí también está el selector de campus.
 - La sesión se cierra tras 30 minutos sin actividad y, como máximo, 4 horas después de entrar (`SESION_INACTIVIDAD_MINUTOS` y `SESION_MAXIMA_HORAS` en `.env`). Mientras trabajas, el frontend la renueva sola con `/auth/renovar`.
 
 Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_contrasena` de `usuarios`: nunca el hash de la contraseña.
