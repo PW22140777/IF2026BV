@@ -42,6 +42,11 @@ function SelectorCampus({ valor, alCambiar }) {
   )
 }
 
+// Grupos del menú que la persona dejó abiertos (se recuerdan en este navegador)
+function leerGruposAbiertos() {
+  try { return JSON.parse(localStorage.getItem('menu-grupos-abiertos')) || [] } catch { return [] }
+}
+
 function leerCampusGuardado() {
   try { return sessionStorage.getItem('campus-activo') || '' } catch { return '' }
 }
@@ -105,6 +110,20 @@ export default function App() {
   const [mensajeLogin, setMensajeLogin] = useState('')
   const [campusActivo, setCampusActivo] = useState(leerCampusGuardado)
   const [idInicial, setIdInicial] = useState(null)   // registro a abrir al cambiar de sección
+  const [gruposAbiertos, setGruposAbiertos] = useState(leerGruposAbiertos)
+
+  // Menú en acordeón: cada grupo se abre o cierra con su título
+  function cambiarGrupos(nuevos) {
+    setGruposAbiertos(nuevos)
+    try { localStorage.setItem('menu-grupos-abiertos', JSON.stringify(nuevos)) } catch { /* sin almacenamiento */ }
+  }
+  const alternarGrupo = (g) => cambiarGrupos(gruposAbiertos.includes(g) ? gruposAbiertos.filter((x) => x !== g) : [...gruposAbiertos, g])
+
+  // El grupo de la pantalla actual se abre solo (por ejemplo, al llegar desde el Resumen)
+  const grupoActual = SECCIONES.find((s) => s.id === seccion)?.grupo
+  useEffect(() => {
+    if (grupoActual && !gruposAbiertos.includes(grupoActual)) cambiarGrupos([...gruposAbiertos, grupoActual])
+  }, [grupoActual])   // eslint-disable-line react-hooks/exhaustive-deps
   // /registro y /registro/listo: página de los Observadores (entran con su cuenta institucional)
   const [enRegistro, setEnRegistro] = useState(() => window.location.pathname.startsWith('/registro'))
   const usarIdInicial = useCallback(() => setIdInicial(null), [])
@@ -170,11 +189,24 @@ export default function App() {
             </button>
           </div>
           <SelectorCampus valor={campusActivo} alCambiar={elegirCampus} />
-          {grupos.map((g) => (
-            <div key={g} className="grupo-menu">
-              {g && <p className="titulo-grupo">{g}</p>}
-              <ul>
-                {visibles.filter((s) => (s.grupo || '') === g).map((s) => (
+          {grupos.map((g) => {
+            const opciones = visibles.filter((s) => (s.grupo || '') === g)
+            const abierto = !g || gruposAbiertos.includes(g)   // lo que no tiene grupo (Resumen) siempre se ve
+            const idLista = `grupo-${g || 'general'}`.replace(/\s+/g, '-').toLowerCase()
+            return (
+            <div key={g} className={abierto ? 'grupo-menu' : 'grupo-menu cerrado'}>
+              {g && (
+                <button type="button" className="titulo-grupo" aria-expanded={abierto} aria-controls={idLista}
+                        onClick={() => alternarGrupo(g)}>
+                  <span>{g}</span>
+                  <span className="grupo-indicador" aria-hidden="true">
+                    {!abierto && <span className="grupo-cuenta">{opciones.length}</span>}
+                    <span className="grupo-flecha">▾</span>
+                  </span>
+                </button>
+              )}
+              <ul id={idLista} hidden={!abierto}>
+                {opciones.map((s) => (
                   <li key={s.id}>
                     <button type="button" aria-current={seccion === s.id ? 'page' : undefined}
                             onClick={() => { setIdInicial(null); setSeccion(s.id); setMenuAbierto(false) }}>
@@ -184,7 +216,8 @@ export default function App() {
                 ))}
               </ul>
             </div>
-          ))}
+            )
+          })}
           <div className="sesion">
             <p><strong>{usuario.nombre}</strong><br /><span className="tenue">{NOMBRES_ROL[usuario.rol]}</span></p>
             {usuario.rol === 'CONSULTA' && <p className="tenue nota-rol">Tu rol es de solo lectura.</p>}
