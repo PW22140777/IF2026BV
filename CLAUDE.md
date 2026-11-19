@@ -57,7 +57,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/auth/` | Login con JWT, usuarios y roles. Crea los usuarios de demostración si la tabla está vacía. |
 | `services/inmuebles/` | Campus, edificios, áreas, inventario y el catálogo `/tipos-elemento`, y `/resumen/inmuebles`. |
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
-| `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario y servicios (los consumos solo entre roles internos); respuestas y moderación. |
+| `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario y servicios (los consumos solo entre roles internos); respuestas, moderación y hasta 4 fotos por comentario (`/comentarios/con-fotos`, adjuntos con `recurso = 'COMENTARIO'`). |
 | `services/mantenimiento/` | Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales; técnicos asignados; iniciar y terminar con lista de verificación. |
 | `services/archivos/` | Guarda los adjuntos en el volumen `datos_archivos` (`ARCHIVOS_BACKEND=local`) y los entrega con enlaces firmados. No usa la base. `almacen.py` tiene la lógica pura (tipo, firma, rutas). |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |

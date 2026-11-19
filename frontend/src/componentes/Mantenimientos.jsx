@@ -7,6 +7,7 @@ import { legible } from '../recursos'
 import { CamposDelTipo, propiedadAApi } from './Formulario'
 import { Adjuntos } from './Adjuntos'
 import { Historial } from './Historial'
+import { usePanelVisible } from '../panel'
 
 const FILTROS = [
   ['abiertas', 'Abiertas', { estado: 'PROGRAMADA,EN_CURSO' }],
@@ -116,6 +117,7 @@ function Terminar({ orden, alTerminar }) {
 }
 
 function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
+  const panel = usePanelVisible(orden.id)
   const [error, setError] = useState('')
   const [cancelando, setCancelando] = useState(false)
   const [motivo, setMotivo] = useState('')
@@ -145,7 +147,7 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
   }
 
   return (
-    <aside className="panel-detalle" aria-label={`Orden de mantenimiento ${orden.id}`}>
+    <aside className="panel-detalle" aria-label={`Orden de mantenimiento ${orden.id}`} ref={panel}>
       <header className="detalle-encabezado">
         <h2>#{orden.id} {orden.plantilla_nombre}</h2>
         <button type="button" className="boton-texto" onClick={alCerrar}>Cerrar</button>

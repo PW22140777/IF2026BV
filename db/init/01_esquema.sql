@@ -344,7 +344,7 @@ CREATE TABLE archivos_adjuntos (
     id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     recurso             TEXT NOT NULL
                         CONSTRAINT adjuntos_recurso_valido
-                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'ORDEN_MANTENIMIENTO')),
+                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'ORDEN_MANTENIMIENTO', 'COMENTARIO')),
     recurso_id          INTEGER NOT NULL,
     nombre              TEXT NOT NULL CONSTRAINT adjuntos_nombre_valido CHECK (length(btrim(nombre)) BETWEEN 1 AND 120),
     descripcion         TEXT CONSTRAINT adjuntos_descripcion_valida CHECK (length(descripcion) <= 500),

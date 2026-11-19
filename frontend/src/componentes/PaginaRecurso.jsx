@@ -10,6 +10,7 @@ import { Comentarios } from './Comentarios'
 import { MantenimientosDelRecurso } from './MantenimientosDelRecurso'
 import { Formulario } from './Formulario'
 import { Historial } from './Historial'
+import { usePanelVisible } from '../panel'
 
 export function Estado({ valor }) {
   const tono = {
@@ -119,6 +120,7 @@ function ServiciosDelRecurso({ filtro, id }) {
 }
 
 function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerrar, alAbrir }) {
+  const panel = usePanelVisible(registro.id)
   const catalogos = useCatalogos()
   const [modo, setModo] = useState('ver')         // ver | editar | eliminar
   const [motivo, setMotivo] = useState('')
@@ -169,7 +171,7 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
 
   if (modo === 'editar') {
     return (
-      <aside className="panel-detalle" aria-label="Editar">
+      <aside className="panel-detalle" aria-label="Editar" ref={panel}>
         <Formulario config={config} registro={registro} campusActivo={campusActivo} alCancelar={() => setModo('ver')}
                     alGuardar={(datos) => ejecutar(api(ruta, { metodo: 'PATCH', cuerpo: datos }))} />
       </aside>
@@ -177,7 +179,7 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
   }
 
   return (
-    <aside className="panel-detalle" aria-label={`Detalle de ${config.singular}`}>
+    <aside className="panel-detalle" aria-label={`Detalle de ${config.singular}`} ref={panel}>
       <header className="detalle-encabezado">
         <h2>{config.nombre(registro)}</h2>
         <button type="button" className="boton-texto" onClick={alCerrar}>Cerrar</button>

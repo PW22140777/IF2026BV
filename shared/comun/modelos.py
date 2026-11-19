@@ -227,7 +227,7 @@ class ArchivoAdjunto(ConResponsabilidad, Base):
     __tablename__ = "archivos_adjuntos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO u ORDEN_MANTENIMIENTO
+    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO, ORDEN_MANTENIMIENTO o COMENTARIO
     recurso_id: Mapped[int]
     nombre: Mapped[str]
     descripcion: Mapped[str | None]

@@ -359,11 +359,31 @@ def probar_observadores(adm, tec, con, ed):
     assert [x["autor_rol"] for x in lista] == ["OBSERVADOR", "TECNICO"], lista
     paso("el Observador comenta un edificio, el Técnico responde y Consulta solo lee")
 
+    # Fotos en los comentarios: solo el Observador, de 1 a 4, solo imágenes; si una falla no queda nada
+    def con_fotos(quien, archivos, texto="Así está la rampa"):
+        return cliente.post("/api/v1/comentarios/con-fotos", headers=quien,
+                            data={**{k: str(v) for k, v in base.items()}, "texto": texto},
+                            files=[("fotos", a) for a in archivos])
+    png = ("rampa.png", PNG_PRUEBA, "image/png")
+    antes = len(cliente.get("/api/v1/comentarios", headers=con, params=base).json())
+    r = con_fotos(obs, [png, ("detalle.jpg", JPG_PRUEBA, "image/jpeg")])
+    assert r.status_code == 201 and len(r.json()["fotos"]) == 2, r.text
+    assert con_fotos(obs, [png] * 5).status_code == 422
+    assert con_fotos(tec, [png]).status_code == 403
+    assert con_fotos(obs, [png, ("nota.png", b"<html>no</html>", "image/png")]).status_code == 422
+    lista = cliente.get("/api/v1/comentarios", headers=con, params=base).json()
+    assert len(lista) == antes + 1, lista    # el envío con una foto mala no dejó comentario
+    con_foto = next(c for c in lista if c["fotos"])
+    assert len(con_foto["fotos"]) == 2 and cliente.get(con_foto["fotos"][0]["url"]).content == PNG_PRUEBA
+    paso("el Observador adjunta hasta 4 fotos a un comentario; con una foto inválida no se guarda nada")
+
     assert cliente.request("DELETE", f"/api/v1/comentarios/{c.json()['id']}", headers=tec,
                            json={"motivo": "No aplica"}).status_code == 403
     cliente.request("DELETE", f"/api/v1/comentarios/{c.json()['id']}", headers=adm,
                     json={"motivo": "Prueba de moderación"}).raise_for_status()
-    assert cliente.get("/api/v1/comentarios", headers=obs, params=base).json() == []
+    visibles = cliente.get("/api/v1/comentarios", headers=obs, params=base).json()
+    # Se ocultó con su respuesta; solo queda el comentario con fotos
+    assert [x["id"] for x in visibles] == [con_foto["id"]], visibles
     ocultos = cliente.get("/api/v1/comentarios", headers=adm, params={**base, "incluir_ocultos": True}).json()
     assert any(x["motivo_eliminacion"] == "Prueba de moderación" for x in ocultos), ocultos
     paso("solo el Administrador oculta un comentario (con su hilo) y conserva el texto con su motivo")

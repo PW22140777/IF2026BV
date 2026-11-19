@@ -57,7 +57,7 @@ GRANT SELECT, INSERT, UPDATE ON ordenes_tecnicos TO mantenimiento_svc;
 GRANT SELECT ON edificios, areas, elementos_inventario, servicios_basicos, tipos_elemento TO mantenimiento_svc;
 
 -- Fichas de los archivos adjuntos (los archivos los guarda archivos-service, que no usa la base)
-GRANT SELECT, INSERT, UPDATE ON archivos_adjuntos TO inmuebles_svc, mantenimiento_svc;
+GRANT SELECT, INSERT, UPDATE ON archivos_adjuntos TO inmuebles_svc, mantenimiento_svc, comentarios_svc;
 
 -- Todos los servicios que generan eventos escriben en la outbox
 GRANT SELECT, INSERT, UPDATE ON outbox TO auth_svc, inmuebles_svc, servicios_svc, comentarios_svc, mantenimiento_svc;

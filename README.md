@@ -129,6 +129,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON
 - «Cerrar sesión» invalida el token en el servidor, aunque alguien lo haya copiado.
 - En «Mi perfil» (GET /auth/perfil) cada quien ve sus datos, lo que puede hacer su rol, cómo entra y sus sesiones abiertas, y puede cerrar las demás con POST /auth/cerrar-otras-sesiones (la actual sigue abierta).
 - «Mi perfil», «Cambiar contraseña» y «Cerrar sesión» están en el menú del usuario, a la derecha de la barra superior; ahí también está el selector de campus.
+- En computadora, el panel de detalle (ver y editar un registro) es parte de la página: crece con su contenido y se desplaza con ella, sin barra propia; al abrir un registro desde abajo de una lista larga, la página sube hasta el panel (`frontend/src/panel.js`). En tableta y teléfono flota encima de la lista y ahí sí se desplaza solo.
 - La sesión se cierra tras 30 minutos sin actividad y, como máximo, 4 horas después de entrar (`SESION_INACTIVIDAD_MINUTOS` y `SESION_MAXIMA_HORAS` en `.env`). Mientras trabajas, el frontend la renueva sola con `/auth/renovar`.
 
 Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_contrasena` de `usuarios`: nunca el hash de la contraseña.
@@ -208,7 +209,7 @@ Reglas: un correo que ya tiene cuenta con contraseña no puede entrar por Google
 3. `auth` acepta tokens de dos directorios: el de la institución y el de cuentas personales (`9188040d-6c67-4c5b-b112-36a304b66dad`). El emisor debe coincidir con el `tid` del token y el correo debe ser `@queretaro.tecnm.mx`.
 4. Quien no tenga cuenta personal la crea en signup.live.com con «Usar un correo existente»: Microsoft le manda un código a su correo de la escuela, así que solo su dueño puede crearla. Las cuentas personales sí pueden aceptar los permisos de una app de editor no verificado (Microsoft la muestra como «no comprobada»).
 
-**Comentarios** (`comentarios-service`, `/api/v1/comentarios`): `GET ?recurso=EDIFICIO&recurso_id=7` (todos), `POST` (Observador; Técnico y Administrador solo con `respuesta_a`), `DELETE /{id}` con `{"motivo"}` (Administrador). Valida que el recurso exista y esté activo, permite un nivel de respuestas y limita a 10 comentarios por minuto por persona. Cada comentario y cada ocultamiento quedan en el historial firmado (`COMENTARIO`).
+**Comentarios** (`comentarios-service`, `/api/v1/comentarios`): `GET ?recurso=EDIFICIO&recurso_id=7` (todos), `POST` (Observador; Técnico y Administrador solo con `respuesta_a`), `DELETE /{id}` con `{"motivo"}` (Administrador). Valida que el recurso exista y esté activo, permite un nivel de respuestas y limita a 10 comentarios por minuto por persona. **Fotos:** el Observador puede adjuntar de 1 a 4 fotos (JPG, PNG o WebP, 10 MB cada una) a un comentario o respuesta con `POST /comentarios/con-fotos` (multipart: `recurso`, `recurso_id`, `texto`, `respuesta_a`, `fotos`). Se guardan en archivos-service como adjuntos con `recurso = 'COMENTARIO'`; si una foto no pasa, no se guarda ni el comentario ni las demás. Al listar, cada comentario trae sus `fotos` con su enlace firmado. Base que ya existe: `db/migraciones/010_fotos_en_comentarios.sql`. Cada comentario y cada ocultamiento quedan en el historial firmado (`COMENTARIO`).
 
 **Pruebas sin Google ni Microsoft:** con `OAUTH_MODO_PRUEBA=true` (solo base local) `GET /api/v1/auth/oauth/inicio?correo_prueba=ana@queretaro.tecnm.mx` entra sin pasar por el proveedor, con las mismas reglas de dominio del proveedor configurado; lo usa `tests/prueba_sistema.py`. `tests/test_oauth.py` prueba la validación del `id_token` con una llave RSA de prueba. **Nunca lo actives en una base con datos reales.**
 
@@ -261,7 +262,7 @@ Además de lo de `develop`, las áreas y el inventario tienen **«Fotos y docume
 | Administrador, Técnico | Subir y quitar adjuntos de edificios, áreas e inventario (quitar pide motivo) |
 | Técnicos asignados, Administrador | Subir y quitar evidencias de una orden que no esté cancelada |
 | Consulta | Ver todo lo anterior |
-| Observador | Ver las fotos y planos de edificios, áreas e inventario |
+| Observador | Ver las fotos y planos de edificios, áreas e inventario, y adjuntar hasta 4 fotos a sus comentarios |
 
 **Cómo funciona.**
 
