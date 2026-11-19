@@ -70,6 +70,7 @@ class EdificioCrear(BaseModel):
     superficie_m2: float | None = Field(default=None, gt=0, le=MAX_SUPERFICIE_M2)
     estado: EstadoInmueble = "OPERATIVO"
     descripcion: str | None = Field(default=None, max_length=2000)
+    carpeta_planos: str | None = Field(default=None, max_length=500, description="Enlace a la carpeta de planos")
     propiedades: dict[str, Any] = Field(default_factory=dict, examples=[{"material": "concreto"}])
 
     _anio = field_validator("anio_construccion")(_anio_no_futuro)
@@ -86,6 +87,7 @@ class EdificioActualizar(BaseModel):
     superficie_m2: float | None = Field(default=None, gt=0, le=MAX_SUPERFICIE_M2)
     estado: EstadoInmueble = Field(default=None)
     descripcion: str | None = Field(default=None, max_length=2000)
+    carpeta_planos: str | None = Field(default=None, max_length=500, description="Enlace a la carpeta de planos")
     propiedades: dict[str, Any] = Field(default=None)
 
     _anio = field_validator("anio_construccion")(_anio_no_futuro)
@@ -100,6 +102,9 @@ class EdificioSalida(SalidaBase):
     superficie_m2: float | None
     estado: str
     descripcion: str | None
+    carpeta_planos: str | None = None
+    fachada_s3: str | None = None      # se cambia solo con PUT /edificios/{id}/fachada
+    fachada_url: str | None = None     # firmada y con caducidad; no va al historial
 
 
 # --------------------------------------------------------------------- áreas

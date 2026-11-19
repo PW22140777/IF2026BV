@@ -333,6 +333,44 @@ CREATE TABLE consumos (
 CREATE UNIQUE INDEX consumos_periodo_activo ON consumos (servicio_id, periodo) WHERE eliminado_en IS NULL;
 
 -- ---------------------------------------------------------------------
+-- Archivos adjuntos (fotos, planos, PDF, evidencias de mantenimiento)
+-- La ficha vive aquí; el archivo, en el almacén de archivos-service (un
+-- volumen local), bajo `clave` = carpeta/<sha256>.<ext>. Escriben las fichas
+-- inmuebles-service (edificios, áreas, inventario) y mantenimiento-service
+-- (evidencias de una orden). Al quitar un adjunto la ficha se marca como
+-- eliminada (borrado lógico) y el archivo sí se borra del almacén.
+-- ---------------------------------------------------------------------
+CREATE TABLE archivos_adjuntos (
+    id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    recurso             TEXT NOT NULL
+                        CONSTRAINT adjuntos_recurso_valido
+                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'ORDEN_MANTENIMIENTO')),
+    recurso_id          INTEGER NOT NULL,
+    nombre              TEXT NOT NULL CONSTRAINT adjuntos_nombre_valido CHECK (length(btrim(nombre)) BETWEEN 1 AND 120),
+    descripcion         TEXT CONSTRAINT adjuntos_descripcion_valida CHECK (length(descripcion) <= 500),
+    categoria           TEXT NOT NULL
+                        CONSTRAINT adjuntos_categoria_valida
+                        CHECK (categoria IN ('FOTO', 'PLANO', 'DOCUMENTO', 'EVIDENCIA', 'OTRO')),
+    nombre_original     TEXT NOT NULL,
+    tipo_mime           TEXT NOT NULL
+                        CONSTRAINT adjuntos_tipo_valido
+                        CHECK (tipo_mime IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+    tamano_bytes        INTEGER NOT NULL CONSTRAINT adjuntos_tamano_valido CHECK (tamano_bytes > 0),
+    sha256              CHAR(64) NOT NULL,       -- huella del contenido: comprueba que nadie lo cambió
+    clave               TEXT NOT NULL,           -- dónde está en el almacén
+    propiedades         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por          INTEGER NOT NULL REFERENCES usuarios (id),
+    modificado_en       TIMESTAMPTZ,
+    modificado_por      INTEGER,
+    eliminado_en        TIMESTAMPTZ,
+    eliminado_por       INTEGER,
+    motivo_eliminacion  TEXT
+);
+CREATE INDEX adjuntos_por_recurso ON archivos_adjuntos (recurso, recurso_id) WHERE eliminado_en IS NULL;
+CREATE INDEX adjuntos_por_clave ON archivos_adjuntos (clave) WHERE eliminado_en IS NULL;
+
+-- ---------------------------------------------------------------------
 -- Comentarios sobre los recursos (dueño: comentarios-service)
 -- Los escribe un Observador; el Técnico y el Administrador pueden responder
 -- (respuesta_a). Solo el Administrador los oculta: borrado lógico con motivo.

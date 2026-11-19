@@ -109,6 +109,8 @@ class Edificio(ConResponsabilidad, Base):
     superficie_m2: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     estado: Mapped[str] = mapped_column(default="OPERATIVO")
     descripcion: Mapped[str | None]
+    carpeta_planos: Mapped[str | None]    # enlace a una carpeta externa (Drive, OneDrive...)
+    fachada_s3: Mapped[str | None]        # clave de la foto de fachada en archivos-service (mismo nombre que en develop)
     propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
@@ -216,6 +218,26 @@ class EventoProcesado(Base):
     consumidor: Mapped[str] = mapped_column(primary_key=True)
     evento_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     procesado_en: Mapped[datetime] = mapped_column(default=ahora)
+
+
+# ---------------------------------------------------------- archivos adjuntos
+class ArchivoAdjunto(ConResponsabilidad, Base):
+    """Ficha de un archivo adjunto; el archivo lo guarda archivos-service bajo `clave`."""
+
+    __tablename__ = "archivos_adjuntos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO u ORDEN_MANTENIMIENTO
+    recurso_id: Mapped[int]
+    nombre: Mapped[str]
+    descripcion: Mapped[str | None]
+    categoria: Mapped[str]                # FOTO, PLANO, DOCUMENTO, EVIDENCIA u OTRO
+    nombre_original: Mapped[str]
+    tipo_mime: Mapped[str]
+    tamano_bytes: Mapped[int]
+    sha256: Mapped[str]
+    clave: Mapped[str]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
 # -------------------------------------------------------------- comentarios

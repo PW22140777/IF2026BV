@@ -6,11 +6,13 @@ Un área puede no tener edificio (cancha, bancas), pero siempre pertenece a un c
 from datetime import date, datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from comun import almacenamiento
+from comun.adjuntos import crear_router_adjuntos
 from comun.app import crear_app
 from comun.config import configuracion
 from comun.db import fabrica_sesiones, get_db
@@ -18,7 +20,7 @@ from comun.historial import registrar_evento
 from comun.propiedades import revisar_valores
 from comun.modelos import Area, Campus, Edificio, ElementoInventario, TipoElemento
 from comun.recursos import crear_router_recurso
-from comun.seguridad import SISTEMA, SOLO_ADMIN, TODOS, requiere_rol
+from comun.seguridad import EDITORES, SISTEMA, SOLO_ADMIN, TODOS, UsuarioToken, requiere_rol
 
 from .esquemas import (
     AreaActualizar, AreaCrear, AreaSalida, CampusSalida,
@@ -119,9 +121,17 @@ def _texto_pisos(niveles: int) -> str:
     return "solo la planta baja (piso 0)" if niveles == 1 else f"los pisos 0 (planta baja) a {niveles - 1}"
 
 
-async def validar_edificio(db: AsyncSession, datos: dict, existente: Edificio | None) -> None:
+async def validar_edificio(db: AsyncSession, datos: dict, existente: Edificio | None) -> dict:
     if "campus_id" in datos:   # solo al crear: el campus de un edificio no cambia
         await _exige_campus_fijo(db, datos["campus_id"])
+    # Carpeta de planos: un enlace (Drive, OneDrive...); sin esquema se le pone https://
+    if datos.get("carpeta_planos") is not None:
+        enlace = datos["carpeta_planos"].strip()
+        if enlace and not enlace.lower().startswith(("http://", "https://")):
+            if ":" in enlace.split("/")[0]:   # javascript:, data:... no son enlaces a una carpeta
+                raise HTTPException(422, "La carpeta de planos debe ser un enlace web (https://...)")
+            enlace = f"https://{enlace}"
+        datos["carpeta_planos"] = enlace or None
     # Si se reducen los niveles, ninguna área activa puede quedar en un piso que ya no existe
     if existente is not None and datos.get("niveles") is not None:
         niveles = datos["niveles"]
@@ -133,6 +143,7 @@ async def validar_edificio(db: AsyncSession, datos: dict, existente: Edificio | 
             raise HTTPException(409, f"El edificio tiene áreas en el piso {piso_mas_alto}; con {niveles} "
                                      f"nivel(es) solo existen {_texto_pisos(niveles)}. "
                                      "Cambia primero el piso de esas áreas o indica más niveles")
+    return datos
 
 
 async def edificio_antes_de_eliminar(db: AsyncSession, edificio: Edificio) -> None:
@@ -145,12 +156,49 @@ async def edificio_antes_de_restaurar(db: AsyncSession, edificio: Edificio) -> N
     await _padre_activo(db, Campus, edificio.campus_id, "Su campus está eliminado; restaura primero el campus")
 
 
+async def completar_fachadas(salidas: list[EdificioSalida]) -> None:
+    """URL firmada de la foto de fachada de cada edificio, en una sola llamada a archivos-service."""
+    urls = await almacenamiento.urls(sorted({s.fachada_s3 for s in salidas if s.fachada_s3}))
+    for s in salidas:
+        s.fachada_url = urls.get(s.fachada_s3) if s.fachada_s3 else None
+
+
 router_edificios = crear_router_recurso(
     ruta="/edificios", etiqueta="Edificios", recurso="EDIFICIO", modelo=Edificio,
     Crear=EdificioCrear, Actualizar=EdificioActualizar, Salida=EdificioSalida,
     filtros=filtros_edificios, validar=validar_edificio,
     antes_de_eliminar=edificio_antes_de_eliminar, antes_de_restaurar=edificio_antes_de_restaurar,
+    completar_salida=completar_fachadas, campos_temporales=frozenset({"fachada_url"}),
 )
+
+
+@router_edificios.put("/{id}/fachada", response_model=EdificioSalida,
+                      summary="Subir o cambiar la foto de fachada del edificio (JPG, PNG o WebP)")
+async def cambiar_fachada(
+    id: int,
+    archivo: UploadFile = File(...),
+    usuario: UsuarioToken = Depends(requiere_rol(*EDITORES)),
+    db: AsyncSession = Depends(get_db),
+):
+    edificio = await _exige_activo(db, Edificio, id, "El edificio")
+    foto = lambda e: EdificioSalida.model_validate(e).model_dump(mode="json", exclude={"fachada_url"})  # noqa: E731
+    antes, anterior = foto(edificio), edificio.fachada_s3
+    guardado = await almacenamiento.guardar(f"edificios/{id}/fachada", archivo, categoria="imagen")
+    edificio.fachada_s3 = guardado["clave"]
+    edificio.modificado_en, edificio.modificado_por = datetime.now(timezone.utc), usuario.id
+    await db.flush()
+    await registrar_evento(db, accion="MODIFICAR", recurso="EDIFICIO", recurso_id=edificio.id, usuario=usuario,
+                           antes=antes, despues=foto(edificio), motivo="Foto de fachada actualizada")
+    await db.commit()
+    # La foto anterior ya no la usa nadie: se borra del almacén (los adjuntos sí se borran)
+    if anterior and anterior != edificio.fachada_s3:
+        try:
+            await almacenamiento.borrar(anterior)
+        except HTTPException:
+            log.warning("fachada_anterior_no_borrada", edificio_id=id)
+    salida = EdificioSalida.model_validate(edificio)
+    salida.fachada_url = guardado.get("url")
+    return salida
 
 
 # --------------------------------------------------------------------- áreas
@@ -535,11 +583,21 @@ def _consumidores():
     return [consumidor("inmuebles.mantenimiento", PATRONES, aplicar)]
 
 
+# Archivos adjuntos (fotos, planos, PDF): la ficha aquí, el archivo en archivos-service
+router_archivos_edificios = crear_router_adjuntos(ruta="/edificios", recurso="EDIFICIO", modelo=Edificio,
+                                                  carpeta="edificios", etiqueta="Edificios: archivos")
+router_archivos_areas = crear_router_adjuntos(ruta="/areas", recurso="AREA", modelo=Area,
+                                              carpeta="areas", etiqueta="Áreas: archivos")
+router_archivos_inventario = crear_router_adjuntos(ruta="/inventario", recurso="INVENTARIO", modelo=ElementoInventario,
+                                                   carpeta="inventario", etiqueta="Inventario: archivos",
+                                                   categoria_inicial="FOTO")
+
 app = crear_app(
     nombre="inmuebles",
     titulo="inmuebles-service",
     descripcion="Campus fijos (Centro y Norte), edificios, áreas (con o sin edificio) e inventario de cada área.",
-    routers=[router_campus, router_edificios, router_areas, router_inventario, router_tipos, router_resumen],
+    routers=[router_campus, router_edificios, router_areas, router_inventario, router_tipos, router_resumen,
+             router_archivos_edificios, router_archivos_areas, router_archivos_inventario],
     al_iniciar=asegurar_campus_fijos,
     consumidores=_consumidores() if configuracion().rabbitmq_url else (),
 )

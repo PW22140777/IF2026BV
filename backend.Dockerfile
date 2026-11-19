@@ -22,9 +22,9 @@ RUN pip install -r requirements.txt
 # 3. Código del servicio
 COPY ${SERVICIO}/app ./app
 
-# Usuario sin privilegios; /data guarda la llave de firma de audit-service
+# Usuario sin privilegios; /data guarda la llave de firma de audit-service y los adjuntos
 RUN useradd --create-home --uid 1000 app \
-    && mkdir -p /data/llaves \
+    && mkdir -p /data/llaves /data/archivos \
     && chown -R app /data
 USER app
 

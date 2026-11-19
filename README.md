@@ -111,7 +111,8 @@ Para borrar todo y empezar de cero (base de datos, colas y llave de firma): `doc
 ## Arquitectura
 
 ```text
-Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / audit ──> PostgreSQL (única)
+Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (única)
+                 │                         └── inmuebles / mantenimiento ──> archivos ──> volumen datos_archivos
                  │                                    │
                  └── frontend (Nginx)                 └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                          └────> servicios (reacciones)
@@ -237,11 +238,50 @@ Vienen tres: «Correctivo de aire acondicionado» (por estado: malo o fuera de s
 - Una orden automática nace sin técnicos: el Administrador la asigna. No puede haber dos órdenes abiertas de la misma plantilla para el mismo recurso.
 - El resultado «Parcial» solo termina la orden; si hace falta otra, se programa a mano.
 - Si el recurso se elimina, sus órdenes abiertas se cancelan solas.
-- **Evidencias (fotos, PDF):** quedan como esqueleto (`services/mantenimiento/app/evidencias.py`); las rutas responden 501 y el botón aparece deshabilitado hasta que se defina dónde se guardan los archivos.
+- **Evidencias (fotos, PDF):** quienes atienden la orden las suben desde su panel mientras no esté cancelada (ver «Archivos adjuntos»).
 
 **Cómo funciona por dentro.** `mantenimiento-service` (`/api/v1/mantenimientos`) guarda plantillas, órdenes y técnicos asignados (quitar a uno marca `quitado_en`; no se borra). No escribe las tablas de los recursos: al iniciar o terminar publica `orden_mantenimiento.iniciada.v1` / `.terminada.v1` con `estado_recurso_nuevo`, e inmuebles-service o servicios-service aplican el estado y dejan su evento a nombre del sistema (`comun/mantenimientos.py`). Escucha `edificio/area/inventario/servicio.*.v1` para abrir órdenes por estado (solo cambios hechos por una persona, así el estado que deja un mantenimiento no abre otra) y para cancelar las de un recurso eliminado. Una tarea de fondo abre las periódicas al arrancar y cada hora, con `pg_advisory_xact_lock` para que varias réplicas no dupliquen órdenes.
 
 **Base que ya existe:** aplica `db/migraciones/008_mantenimientos.sql` como dueño de la base con `-v pass_mantenimiento=…` (`DB_PASS_MANTENIMIENTO`).
+
+## Archivos adjuntos (fotos, planos, PDF y evidencias)
+
+Se aceptan JPG, PNG, WebP y PDF de hasta 10 MB. Los edificios tienen las mismas propiedades con archivo que en la rama `develop` de IF2026B:
+
+| Propiedad del edificio | Qué guarda | Cómo se cambia |
+| --- | --- | --- |
+| Foto de fachada (`fachada_s3`, y `fachada_url` firmada en las respuestas) | Una imagen (JPG, PNG o WebP); la nueva reemplaza a la anterior, que se borra del almacén | `PUT /edificios/{id}/fachada` o «Agregar / Cambiar foto de fachada» en el panel |
+| Archivos del edificio | Varios archivos con nombre y descripción (planos, dictámenes, fotos) | `/edificios/{id}/archivos` o la sección «Archivos del edificio» |
+| Carpeta de planos (`carpeta_planos`) | Un enlace a una carpeta externa (Drive, OneDrive); sin `https://` se le agrega, y `javascript:` se rechaza | En el formulario del edificio |
+
+Además de lo de `develop`, las áreas y el inventario tienen **«Fotos y documentos»** (con tipo: foto, plano, documento u otro) y cada orden de mantenimiento tiene **«Evidencias»**. En el «Recorrido», el Observador ve la fachada, la carpeta de planos y los archivos de edificios y áreas, pero no las evidencias.
+
+| Rol | Puede |
+| --- | --- |
+| Administrador, Técnico | Subir y quitar adjuntos de edificios, áreas e inventario (quitar pide motivo) |
+| Técnicos asignados, Administrador | Subir y quitar evidencias de una orden que no esté cancelada |
+| Consulta | Ver todo lo anterior |
+| Observador | Ver las fotos y planos de edificios, áreas e inventario |
+
+**Cómo funciona.**
+
+1. El navegador sube el archivo a `POST /api/v1/edificios/{id}/archivos` (o `/areas`, `/inventario`, `/mantenimientos/ordenes/{id}/evidencias`).
+2. `inmuebles-service` (o `mantenimiento-service`) se lo pasa a **`archivos-service`** por la red interna con `X-Token-Interno` (`comun/almacenamiento.py`).
+3. `archivos-service` decide el tipo por los primeros bytes del archivo, no por su nombre, así que un HTML o SVG disfrazado de imagen se rechaza. Lo guarda en el volumen de Docker `datos_archivos`, con su SHA-256 como nombre (`edificios/7/<sha256>.png`).
+4. El servicio guarda la ficha en `archivos_adjuntos` (nombre, tipo, tamaño, SHA-256, clave, quién lo subió) y deja el evento `archivo.creado.v1` en el historial firmado.
+5. Al listar, cada archivo trae una **URL firmada que caduca en 1 hora**: `/api/v1/archivos/descarga?clave=…&expira=…&firma=…`. Es la única ruta pública de `archivos-service`. Un `<img src>` no puede mandar el JWT, así que el permiso va en la firma HMAC (`ARCHIVOS_SECRETO_FIRMA`); alterada o vencida responde 403.
+
+**Quitar un adjunto** pide motivo: la ficha queda con borrado lógico y en el historial (`ARCHIVO`), y **el archivo sí se borra del almacén**, salvo que otra ficha activa use el mismo contenido. Es la excepción a «nada se borra físicamente», porque un archivo no tiene historial propio.
+
+**Dónde se guardan.** `ARCHIVOS_BACKEND=local` usa el volumen `datos_archivos`. Para respaldarlo:
+
+```bash
+docker run --rm -v infraestructura-fisica-bv_datos_archivos:/datos -v "$PWD":/respaldo alpine tar czf /respaldo/archivos.tgz -C /datos .
+```
+
+La versión para S3 vive en la rama `develop` de IF2026B. Al unirlas se agrega como otro backend de `archivos-service` (guardar, URL, borrar); `inmuebles` y `mantenimiento` no cambian. Diferencia con `develop`: aquí los archivos del edificio van en `archivos_adjuntos` (con `recurso = 'EDIFICIO'`), no en `archivos_edificio`; esa tabla sigue en el esquema por compatibilidad, pero este código no la usa.
+
+**Base que ya existe:** aplica `db/migraciones/009_archivos_adjuntos.sql` como dueño de la base. En `.env` agrega `ARCHIVOS_SECRETO_FIRMA` y `ARCHIVOS_TOKEN_INTERNO` (32 caracteres o más cada uno; ver `.env.example`).
 
 ## Tipos de elemento y sus propiedades
 
@@ -332,6 +372,7 @@ JSONB. Los resultados se redondean a cuatro decimales.
 │   ├── auth/                login, JWT y usuarios
 │   ├── inmuebles/           campus, edificios, áreas e inventario
 │   ├── servicios/           agua, luz, internet, alcantarillado, su estado y consumos
+│   ├── archivos/            adjuntos en un volumen local, enlaces de descarga firmados
 │   └── audit/               historial firmado y verificación
 ├── gateway/                 API Gateway
 ├── frontend/                interfaz web (React)

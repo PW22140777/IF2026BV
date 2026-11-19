@@ -26,7 +26,7 @@ Roles:
 
 ## Reglas de negocio (no romperlas)
 
-- **Nada se borra físicamente.** Eliminar marca `eliminado_en`, `eliminado_por` y `motivo_eliminacion` (motivo obligatorio, mínimo 5 caracteres). Los usuarios de base de datos de los servicios no tienen permiso `DELETE`. Solo el Administrador restaura.
+- **Nada se borra físicamente.** Eliminar marca `eliminado_en`, `eliminado_por` y `motivo_eliminacion` (motivo obligatorio, mínimo 5 caracteres). Los usuarios de base de datos de los servicios no tienen permiso `DELETE`. Solo el Administrador restaura. Excepción: el archivo de un adjunto sí se borra del almacén; su ficha en `archivos_adjuntos` queda con borrado lógico.
 - **Todo cambio genera un evento** con el estado `antes` y `despues` completos. Se registra con `registrar_evento()` en la misma transacción que el cambio (patrón outbox).
 - **Campus:** todo edificio pertenece a un campus y no puede cambiar de campus. Un área con edificio está en el campus de su edificio; la base lo garantiza con la FK compuesta `areas (edificio_id, campus_id) -> edificios (id, campus_id)`. Un área sin edificio indica su campus y se puede mover. El inventario pertenece al campus de su área (no tiene columna `campus_id`).
 - **Servicios básicos:** abastecen exactamente a uno entre campus, edificio o área (`CHECK num_nonnulls(campus_id, edificio_id, area_id) = 1`). Al cambiar el destino, los otros dos se ponen en null.
@@ -35,13 +35,16 @@ Roles:
 - **Propiedades flexibles:** cada recurso tiene una columna `propiedades` (JSONB) para datos según el tipo, p. ej. `{"btu": 12000}`. Se agregan, cambian o quitan con `PUT` y `DELETE /{recurso}/{id}/propiedades/{clave}`, y cada cambio queda en el historial.
 - **Tipos de elemento:** el tipo de un elemento de inventario debe existir en `tipos_elemento`, que define sus propiedades (`propiedades_definidas`: clave, etiqueta, tipo texto/numero/opcion/fecha/si_no, límites, opciones, requerida) y si usa medidas. `validar_elemento` revisa las propiedades al crear, modificar o cambiar una sola. Solo el Administrador cambia el catálogo (`roles_edicion=SOLO_ADMIN` en `crear_router_recurso`); la clave no cambia y no se elimina un tipo con elementos activos.
 - **Observadores y comentarios:** el rol `OBSERVADOR` solo se obtiene entrando con la cuenta institucional (`services/auth/app/oauth.py`: código + PKCE, `id_token` validado contra Google —`hd` y `email_verified`— o Microsoft —inquilino—, y el dominio). Un correo con contraseña no entra por OAuth y un Observador no entra con contraseña. `comentarios-service` guarda los comentarios: los abre un Observador; Técnico y Administrador solo responden (`respuesta_a`); solo el Administrador oculta, con motivo (borrado lógico). `OAUTH_MODO_PRUEBA=true` es solo para pruebas en base local.
-- **Mantenimientos:** `mantenimiento-service` guarda plantillas (`plantillas_mantenimiento`) y órdenes (`ordenes_mantenimiento`, técnicos en `ordenes_tecnicos`). Solo el Administrador cambia plantillas, asigna y cancela; los técnicos asignados inician y terminan. El estado del recurso no lo escribe este servicio: publica `orden_mantenimiento.iniciada/terminada.v1` con `estado_recurso_nuevo` e inmuebles/servicios lo aplican (`comun/mantenimientos.py`). Las listas de verificación usan `comun/propiedades.py`, igual que los tipos de elemento. Las evidencias son un esqueleto (501).
+- **Mantenimientos:** `mantenimiento-service` guarda plantillas (`plantillas_mantenimiento`) y órdenes (`ordenes_mantenimiento`, técnicos en `ordenes_tecnicos`). Solo el Administrador cambia plantillas, asigna y cancela; los técnicos asignados inician y terminan. El estado del recurso no lo escribe este servicio: publica `orden_mantenimiento.iniciada/terminada.v1` con `estado_recurso_nuevo` e inmuebles/servicios lo aplican (`comun/mantenimientos.py`). Las listas de verificación usan `comun/propiedades.py`, igual que los tipos de elemento. Las evidencias son adjuntos de la orden (`/mantenimientos/ordenes/{id}/evidencias`).
+- **Edificio, como en develop:** foto de fachada en `edificios.fachada_s3` (`PUT /edificios/{id}/fachada`; la respuesta trae `fachada_url` firmada gracias a `completar_salida` en `crear_router_recurso`, y `campos_temporales` la deja fuera del historial), archivos con nombre y descripción, y `carpeta_planos` (enlace; `validar_edificio` agrega `https://` y rechaza otros esquemas).
+- **Archivos adjuntos:** `crear_router_adjuntos()` (`comun/adjuntos.py`) agrega `/{recurso}/{id}/archivos` (listar, subir, quitar con motivo) a edificios, áreas e inventario, y `/evidencias` a las órdenes. La ficha va a `archivos_adjuntos` (evento `ARCHIVO`); el archivo lo guarda `archivos-service` (`comun/almacenamiento.py`, con `X-Token-Interno`), que decide el tipo por los primeros bytes (JPG, PNG, WebP, PDF; 10 MB) y lo nombra con su SHA-256. El navegador descarga solo por `/api/v1/archivos/descarga` con una firma HMAC que caduca; las demás rutas de `archivos-service` no están en `RUTAS`.
 - **Auditoría:** `audit_log` es de solo agregar (triggers bloquean `UPDATE`, `DELETE` y `TRUNCATE`). Cada registro tiene `hash = SHA-256(hash_anterior + JSON canónico)` y firma Ed25519. Solo `audit-service` escribe ahí.
 
 ## Arquitectura
 
 ```text
 Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (una sola base)
+                 │                     └── inmuebles / mantenimiento ──> archivos ──> volumen datos_archivos
                  │                     └── auth ⇄ Google (o Microsoft Entra ID): registro de Observadores
                  └── frontend (Nginx)              └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                        └────> servicios (reacciones)
@@ -56,12 +59,13 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
 | `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario y servicios (los consumos solo entre roles internos); respuestas y moderación. |
 | `services/mantenimiento/` | Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales; técnicos asignados; iniciar y terminar con lista de verificación. |
+| `services/archivos/` | Guarda los adjuntos en el volumen `datos_archivos` (`ARCHIVOS_BACKEND=local`) y los entrega con enlaces firmados. No usa la base. `almacen.py` tiene la lógica pura (tipo, firma, rutas). |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |
 | `shared/comun/` | Paquete común instalado en cada imagen (ver abajo). |
 | `frontend/` | React + Vite. Selector global «Campus con el que trabajas» que filtra todas las pantallas. |
 | `db/init/` | `01_esquema.sql` (tablas, índices, triggers) y `02_usuarios_bd.sh` (un usuario de base por servicio). |
 | `observabilidad/` | `prometheus.yml` (descubre instancias en Consul) y tablero de Grafana. |
-| `tests/` | `test_cadena.py` (unitarias, sin Docker) y `prueba_sistema.py` (humo contra el sistema levantado). |
+| `tests/` | `test_cadena.py`, `test_oauth.py` y `test_archivos.py` (unitarias, sin Docker) y `prueba_sistema.py` (humo contra el sistema levantado). |
 
 ### Paquete `shared/comun`
 

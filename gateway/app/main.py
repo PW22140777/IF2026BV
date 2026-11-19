@@ -50,15 +50,18 @@ RUTAS: dict[str, str] = {
     "/api/v1/historial": "audit",
     "/api/v1/auditoria": "audit",
     "/api/v1/comentarios": "comentarios",
+    # Solo la descarga con enlace firmado; las demás rutas de archivos-service son internas
+    "/api/v1/archivos/descarga": "archivos",
     "/api/v1/mantenimientos": "mantenimiento",
     "/api/v1/resumen/mantenimientos": "mantenimiento",
 }
-SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "comentarios", "mantenimiento")
+SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "comentarios", "mantenimiento", "archivos")
 # Sin token: el login y el inicio con la cuenta institucional (también cuentan en el límite de logins)
 RUTAS_PUBLICAS = {"/api/v1/auth/login", "/api/v1/auth/oauth/inicio", "/api/v1/auth/oauth/callback",
                   "/api/v1/auth/oauth/canjear"}
 # Sin token pero con el límite normal de la API: solo dice con qué cuenta entran los Observadores
-RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/auth/oauth/proveedor"}
+RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/auth/oauth/proveedor",
+                                    "/api/v1/archivos/descarga"}   # lleva su propia firma que caduca
 
 # Cabeceras que no se deben reenviar (son de cada conexión)
 SALTO_A_SALTO = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
@@ -151,7 +154,9 @@ async def _reenviar(request: Request, base: str, cid: str) -> httpx.Response:
 
 
 def _respuesta(r: httpx.Response, cid: str, extra: dict[str, str] | None = None) -> Response:
-    cabeceras = {k: v for k, v in r.headers.items() if k.lower() not in SALTO_A_SALTO}
+    # Las cabeceras de seguridad del gateway reemplazan (no duplican) las que mande el servicio
+    propias = {k.lower() for k in CABECERAS_SEGURIDAD}
+    cabeceras = {k: v for k, v in r.headers.items() if k.lower() not in SALTO_A_SALTO and k.lower() not in propias}
     cabeceras.update(CABECERAS_SEGURIDAD)
     cabeceras["X-Correlation-Id"] = cid
     if extra:

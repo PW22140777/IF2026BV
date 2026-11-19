@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { legible } from '../recursos'
 import { CamposDelTipo, propiedadAApi } from './Formulario'
+import { Adjuntos } from './Adjuntos'
 import { Historial } from './Historial'
 
 const FILTROS = [
@@ -106,11 +107,6 @@ function Terminar({ orden, alTerminar }) {
         <label htmlFor="orden-notas">Notas</label>
         <textarea id="orden-notas" rows={3} maxLength={4000} value={notas} onChange={(e) => setNotas(e.target.value)} />
       </div>
-      {/* Esqueleto: las evidencias se activarán cuando se defina dónde se guardan los archivos */}
-      <div className="campo">
-        <button type="button" className="boton-secundario" disabled>Adjuntar evidencia (próximamente)</button>
-        <small>Las fotos y PDF estarán disponibles cuando se defina el almacenamiento de archivos.</small>
-      </div>
       {error && <p className="aviso aviso-error" role="alert">{error}</p>}
       <div className="acciones">
         <button type="submit" className="boton-principal" disabled={enviando}>{enviando ? 'Guardando…' : 'Terminar mantenimiento'}</button>
@@ -211,6 +207,11 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
           <div className="acciones"><button type="button" className="boton-secundario" onClick={() => setCancelando(true)}>Cancelar orden</button></div>
         )
       )}
+
+      {/* Fotos y PDF de lo que se hizo: los suben quienes atienden la orden, mientras no esté cancelada */}
+      <Adjuntos key={orden.id} ruta={`/mantenimientos/ordenes/${orden.id}/evidencias`} titulo="Evidencias"
+                puedeEditar={atiende && orden.estado !== 'CANCELADA'} categoriaInicial="EVIDENCIA"
+                categorias={['EVIDENCIA', 'FOTO', 'DOCUMENTO', 'OTRO']} vacio="Sin evidencias todavía." />
 
       <section className="seccion-detalle">
         <h4>Historial</h4>

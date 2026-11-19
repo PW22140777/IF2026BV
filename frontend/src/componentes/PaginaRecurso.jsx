@@ -4,6 +4,8 @@ import { api } from '../api'
 import { useCatalogos } from '../catalogos'
 import { legible } from '../recursos'
 import { resumenDefiniciones } from './EditorDefiniciones'
+import { Adjuntos, FotoFachada } from './Adjuntos'
+import { apiFormulario } from '../api'
 import { Comentarios } from './Comentarios'
 import { MantenimientosDelRecurso } from './MantenimientosDelRecurso'
 import { Formulario } from './Formulario'
@@ -154,6 +156,9 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
     if (campo.tipo === 'estado') return legible(v, 'estado')
     if (campo.tipo === 'estados') return v?.length ? v.map((e) => legible(e, 'estado')).join(', ') : '—'
     if (campo.tipo === 'destino') return catalogos.destinoServicio(registro)
+    if (campo.tipo === 'enlace') {
+      return /^https?:\/\//i.test(v || '') ? <a href={v} target="_blank" rel="noreferrer">Abrir carpeta</a> : '—'
+    }
     if (campo.tipo === 'mes') return v?.slice(0, 7)
     if (campo.tipo === 'fecha') return v ? new Date(`${v}T00:00:00`).toLocaleDateString('es-MX') : '—'
     if (campo.tipo === 'total_lineal') return v === null || v === undefined ? '—' : `${v}${registro.unidad ? ` ${registro.unidad}` : ''}`
@@ -182,6 +187,11 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
         <p className="aviso aviso-eliminado">
           Eliminado el {new Date(registro.eliminado_en).toLocaleDateString('es-MX')}. Motivo: {registro.motivo_eliminacion}
         </p>
+      )}
+
+      {config.fachada && (
+        <FotoFachada url={registro.fachada_url} puedeEditar={puedeEditar}
+                     alSubir={(formulario) => ejecutar(apiFormulario(`${ruta}/fachada`, formulario, 'PUT'))} />
       )}
 
       <dl className="ficha">
@@ -235,6 +245,12 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
       )}
 
       {config.serviciosFiltro && <ServiciosDelRecurso filtro={config.serviciosFiltro} id={registro.id} />}
+
+      {config.adjuntos && (
+        <Adjuntos key={registro.id} ruta={`${config.adjuntos}/${registro.id}/archivos`} puedeEditar={puedeEditar}
+                  categoriaInicial={config.adjuntoInicial} conCategoria={!config.adjuntosSinCategoria}
+                  titulo={config.adjuntosSinCategoria ? 'Archivos del edificio' : undefined} />
+      )}
 
       {config.mantenible && (
         <MantenimientosDelRecurso recurso={config.mantenible} registro={registro} usuario={usuario}

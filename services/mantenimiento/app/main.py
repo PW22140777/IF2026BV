@@ -18,6 +18,7 @@ from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from comun.adjuntos import crear_router_adjuntos
 from comun.app import crear_app
 from comun.config import configuracion
 from comun.db import fabrica_sesiones, get_db
@@ -32,7 +33,6 @@ from comun.seguridad import (
     ADMINISTRADOR, EDITORES, LECTORES_INTERNOS, SISTEMA, SOLO_ADMIN, TECNICO, UsuarioToken, requiere_rol,
 )
 
-from . import evidencias
 from .esquemas import (
     Asignacion, Cancelacion, OrdenCrear, OrdenDetalle, OrdenSalida, Persona, PlantillaActualizar, PlantillaCrear,
     PlantillaSalida, Terminacion,
@@ -375,17 +375,18 @@ async def cancelar(id: int, datos: Cancelacion, usuario: UsuarioToken = Depends(
     return (await _detalles(db, [orden]))[0]
 
 
-# Evidencias: esqueleto. Responden 501 hasta que se defina dónde se guardan los archivos (evidencias.py)
-@router_ordenes.get("/{id}/evidencias", summary="Evidencias de la orden (todavía no disponible)")
-async def listar_evidencias(id: int, _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)), db: AsyncSession = Depends(get_db)):
-    await _orden_abierta(db, id)
-    return {"disponible": evidencias.almacen() is not None, "evidencias": [], "mensaje": evidencias.MENSAJE_NO_DISPONIBLE}
+# Evidencias (fotos, PDF) de una orden: archivos adjuntos que guarda archivos-service
+async def _puede_adjuntar_evidencia(db: AsyncSession, orden: OrdenMantenimiento, usuario: UsuarioToken) -> None:
+    if orden.estado == "CANCELADA":
+        raise HTTPException(409, "La orden está cancelada; ya no se le adjuntan evidencias")
+    await _exige_asignado(db, orden, usuario)   # las suben los técnicos asignados o el Administrador
 
 
-@router_ordenes.post("/{id}/evidencias", summary="Adjuntar una evidencia (todavía no disponible)")
-async def adjuntar_evidencia(id: int, _: UsuarioToken = Depends(requiere_rol(*EDITORES)), db: AsyncSession = Depends(get_db)):
-    await _orden_abierta(db, id)
-    raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, evidencias.MENSAJE_NO_DISPONIBLE)
+router_evidencias = crear_router_adjuntos(
+    ruta="/mantenimientos/ordenes", recurso="ORDEN_MANTENIMIENTO", modelo=OrdenMantenimiento,
+    carpeta="mantenimientos", sufijo="evidencias", etiqueta="Órdenes de mantenimiento: evidencias",
+    roles_lectura=LECTORES_INTERNOS, categoria_inicial="EVIDENCIA", antes_de_adjuntar=_puede_adjuntar_evidencia,
+)
 
 
 # ------------------------------------------------------------------- resumen
@@ -549,6 +550,6 @@ app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
-    routers=[router_plantillas, router_ordenes, router_programar, router_resumen],
+    routers=[router_plantillas, router_ordenes, router_evidencias, router_programar, router_resumen],
     consumidores=_tareas() if configuracion().rabbitmq_url else (),
 )

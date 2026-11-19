@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
 import { useCatalogos } from '../catalogos'
 import { legible } from '../recursos'
+import { Adjuntos, FotoFachada } from './Adjuntos'
 import { Comentarios } from './Comentarios'
 
 // Color de cada estado: bien (verde), atención (ámbar), mal (rojo)
@@ -186,7 +187,12 @@ function Edificio({ edificio, usuario, alIr, directorio }) {
         Clave {edificio.clave} · {niveles} {niveles === 1 ? 'nivel' : 'niveles'}
         {edificio.anio_construccion ? ` · construido en ${edificio.anio_construccion}` : ''}
         {edificio.superficie_m2 ? ` · ${edificio.superficie_m2} m²` : ''}
+        {/^https?:\/\//i.test(edificio.carpeta_planos || '') && (
+          <> · <a href={edificio.carpeta_planos} target="_blank" rel="noreferrer">Carpeta de planos</a></>
+        )}
       </p>
+      {/* La URL de la foto viene firmada en la lista de edificios y caduca en una hora */}
+      {edificio.fachada_url && <FotoFachada url={edificio.fachada_url} />}
 
       <div className="corte" role="list" aria-label="Pisos del edificio">
         {pisos.map((piso) => {
@@ -226,6 +232,9 @@ function Edificio({ edificio, usuario, alIr, directorio }) {
         <h4>Servicios del edificio</h4>
         <Medidores servicios={servicios.filter((s) => s.edificio_id === edificio.id)} usuario={usuario} />
       </section>
+      {/* Fotos y planos: el Observador solo los ve; en la sección «Edificios» se suben */}
+      <Adjuntos key={edificio.id} ruta={`/edificios/${edificio.id}/archivos`} titulo="Archivos del edificio"
+                vacio="Este edificio todavía no tiene archivos." conCategoria={false} />
       <div className="tablero-avisos">
         <Comentarios recurso="EDIFICIO" id={edificio.id} usuario={usuario} titulo="Tablero de avisos del edificio" />
       </div>
@@ -328,6 +337,8 @@ function Salon({ area, usuario, directorio }) {
 
           <h2 className="subtitulo">Servicios del área</h2>
           <Medidores servicios={servicios.filter((s) => s.area_id === area.id)} usuario={usuario} />
+          <Adjuntos key={area.id} ruta={`/areas/${area.id}/archivos`} titulo="Fotos y planos del área"
+                    vacio="Esta área todavía no tiene fotos ni planos." />
         </section>
 
         <div className="tablero-avisos">

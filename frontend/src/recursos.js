@@ -68,6 +68,9 @@ export const RECURSOS = {
     singular: 'edificio',
     ruta: '/edificios',
     comentable: 'EDIFICIO',   // los Observadores pueden comentarlo
+    adjuntos: '/edificios',   // archivos del edificio: nombre + descripción, como en develop
+    adjuntosSinCategoria: true,
+    fachada: true,            // foto de fachada (PUT /edificios/{id}/fachada)
     mantenible: 'EDIFICIO',   // se le programan mantenimientos
     historial: 'edificio',
     serviciosFiltro: 'edificio_id',   // para mostrar sus servicios en el detalle (IF-59)
@@ -86,6 +89,8 @@ export const RECURSOS = {
       { nombre: 'superficie_m2', etiqueta: 'Superficie (m²)', tipo: 'numero', paso: '0.01', minimo: 0.01, maximo: 10000000 },
       { nombre: 'estado', etiqueta: 'Estado', tipo: 'opciones', opciones: ESTADOS_INMUEBLE, inicial: 'OPERATIVO' },
       { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'parrafo' },
+      { nombre: 'carpeta_planos', etiqueta: 'Carpeta de planos', tipo: 'enlace',
+        ayuda: 'Enlace a la carpeta con los planos (Drive, OneDrive…)' },
     ],
   },
 
@@ -94,6 +99,7 @@ export const RECURSOS = {
     singular: 'área',
     ruta: '/areas',
     comentable: 'AREA',
+    adjuntos: '/areas',
     mantenible: 'AREA',
     historial: 'area',
     serviciosFiltro: 'area_id',   // para mostrar sus servicios en el detalle (IF-59)
@@ -121,6 +127,8 @@ export const RECURSOS = {
     singular: 'elemento',
     ruta: '/inventario',
     comentable: 'INVENTARIO',
+    adjuntos: '/inventario',
+    adjuntoInicial: 'FOTO',
     mantenible: 'INVENTARIO',
     historial: 'inventario',
     nombre: (r) => `${legible(r.tipo)}${r.marca ? ' ' + r.marca : ''}`,
