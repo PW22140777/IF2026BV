@@ -51,7 +51,7 @@ function MenuUsuario({ usuario, alIr, alSalir }) {
             <span>{usuario.email}</span>
           </div>
           <button type="button" role="menuitem" onClick={() => elegir(() => alIr('perfil'))}>Mi perfil</button>
-          {/* Un Observador entra con Microsoft: no tiene contraseña que cambiar */}
+          {/* Un Observador entra con Google o Microsoft: no tiene contraseña que cambiar */}
           {usuario.rol !== 'OBSERVADOR' && (
             <button type="button" role="menuitem" onClick={() => elegir(() => alIr('contrasena'))}>Cambiar contraseña</button>
           )}

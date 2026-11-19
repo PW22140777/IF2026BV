@@ -93,6 +93,152 @@ class IdTokenTest(unittest.TestCase):
             oauth.validar_id_token(CFG, id_token(iat=hace_rato, exp=hace_rato + timedelta(minutes=5)), "n-123")
 
 
+class MultiinquilinoTest(unittest.TestCase):
+    """App registrada en otro directorio: se entra por "organizations", pero solo se acepta la institución."""
+
+    CFG_ORG = oauth.ConfiguracionOAuth(
+        inquilino=INQUILINO, cliente_id="cliente-prueba", cliente_secreto="secreto",
+        redireccion="http://localhost:8080/api/v1/auth/oauth/callback",
+        dominios=("queretaro.tecnm.mx",), modo_prueba=False, entrada="organizations",
+    )
+
+    def setUp(self):
+        self._original = oauth._llaves
+        oauth._llaves = lambda _url: _LlavesFalsas()
+
+    def tearDown(self):
+        oauth._llaves = self._original
+
+    def test_se_entra_por_organizations_y_el_emisor_sigue_siendo_la_institucion(self):
+        url = oauth.url_autorizacion(self.CFG_ORG, "estado-1", "nonce-1", "reto-1")
+        self.assertTrue(url.startswith("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?"))
+        self.assertEqual(self.CFG_ORG.emisor, f"https://login.microsoftonline.com/{INQUILINO}/v2.0")
+
+    def test_cuenta_de_la_institucion_entra(self):
+        identidad = oauth.validar_id_token(self.CFG_ORG, id_token(), "n-123")
+        self.assertEqual(identidad.email, "ana.perez@queretaro.tecnm.mx")
+
+    def test_cuenta_de_otra_organizacion_se_rechaza_aunque_su_correo_parezca_institucional(self):
+        otro = "99999999-8888-7777-6666-555555555555"
+        token = id_token(tid=otro, iss=f"https://login.microsoftonline.com/{otro}/v2.0")
+        with self.assertRaises(oauth.ErrorOAuth):
+            oauth.validar_id_token(self.CFG_ORG, token, "n-123")
+
+
+class CuentasPersonalesTest(unittest.TestCase):
+    """Entrada por "common": cuentas personales de Microsoft creadas con el correo de la escuela."""
+
+    CFG_PERS = oauth.ConfiguracionOAuth(
+        inquilino=INQUILINO, cliente_id="cliente-prueba", cliente_secreto="secreto",
+        redireccion="http://localhost:8080/api/v1/auth/oauth/callback",
+        dominios=("queretaro.tecnm.mx",), modo_prueba=False, entrada="common", personales=True,
+    )
+    PERSONAL = {"tid": oauth.CUENTAS_PERSONALES, "iss": oauth.ConfiguracionOAuth.emisor_de(oauth.CUENTAS_PERSONALES)}
+
+    def setUp(self):
+        self._original = oauth._llaves
+        oauth._llaves = lambda _url: _LlavesFalsas()
+
+    def tearDown(self):
+        oauth._llaves = self._original
+
+    def test_cuenta_personal_con_correo_de_la_escuela_entra(self):
+        identidad = oauth.validar_id_token(self.CFG_PERS, id_token(**self.PERSONAL, email="ana.perez@queretaro.tecnm.mx"), "n-123")
+        self.assertEqual(identidad.email, "ana.perez@queretaro.tecnm.mx")
+
+    def test_cuenta_de_la_institucion_tambien_entra(self):
+        self.assertEqual(oauth.validar_id_token(self.CFG_PERS, id_token(), "n-123").sujeto, "oid-ana")
+
+    def test_cuenta_personal_de_otro_dominio_se_rechaza(self):
+        token = id_token(**self.PERSONAL, email="ana@outlook.com", preferred_username="ana@outlook.com")
+        with self.assertRaisesRegex(oauth.ErrorOAuth, "correos institucionales"):
+            oauth.validar_id_token(self.CFG_PERS, token, "n-123")
+
+    def test_sin_activar_personales_se_rechazan(self):
+        with self.assertRaisesRegex(oauth.ErrorOAuth, "directorio institucional"):
+            oauth.validar_id_token(CFG, id_token(**self.PERSONAL), "n-123")
+
+    def test_emisor_que_no_coincide_con_tid_se_rechaza(self):
+        # tid de la institución, pero firmado como emisor de cuentas personales (o al revés)
+        token = id_token(iss=oauth.ConfiguracionOAuth.emisor_de(oauth.CUENTAS_PERSONALES))
+        with self.assertRaises(oauth.ErrorOAuth):
+            oauth.validar_id_token(self.CFG_PERS, token, "n-123")
+
+    def test_otra_organizacion_se_rechaza(self):
+        otro = "99999999-8888-7777-6666-555555555555"
+        with self.assertRaises(oauth.ErrorOAuth):
+            oauth.validar_id_token(self.CFG_PERS, id_token(tid=otro, iss=oauth.ConfiguracionOAuth.emisor_de(otro)), "n-123")
+
+
+class GoogleTest(unittest.TestCase):
+    """OAUTH_PROVEEDOR=google: cuentas del Google Workspace de la escuela."""
+
+    CFG_G = oauth.ConfiguracionOAuth(
+        inquilino="", cliente_id="cliente-google", cliente_secreto="secreto",
+        redireccion="http://localhost:8080/api/v1/auth/oauth/callback",
+        dominios=("queretaro.tecnm.mx",), modo_prueba=False, proveedor=oauth.GOOGLE,
+    )
+
+    def setUp(self):
+        self._original = oauth._llaves
+        self.url_pedida = None
+
+        def llaves(url):
+            self.url_pedida = url
+            return _LlavesFalsas()
+        oauth._llaves = llaves
+
+    def tearDown(self):
+        oauth._llaves = self._original
+
+    def token(self, **cambios):
+        ahora = datetime.now(timezone.utc)
+        claims = {
+            "iss": "https://accounts.google.com", "aud": "cliente-google", "nonce": "n-123", "sub": "1098765",
+            "email": "ana.perez@queretaro.tecnm.mx", "email_verified": True, "hd": "queretaro.tecnm.mx",
+            "name": "Ana Pérez", "iat": ahora, "exp": ahora + timedelta(minutes=5),
+        }
+        claims.update(cambios)
+        return jwt.encode(claims, LLAVE, algorithm="RS256")
+
+    def test_cuenta_de_la_escuela_entra_con_las_llaves_de_google(self):
+        identidad = oauth.validar_id_token(self.CFG_G, self.token(), "n-123")
+        self.assertEqual(identidad, oauth.Identidad(sujeto="1098765", email="ana.perez@queretaro.tecnm.mx",
+                                                    nombre="Ana Pérez", proveedor=oauth.GOOGLE))
+        self.assertEqual(self.url_pedida, oauth.GOOGLE_LLAVES)
+
+    def test_lista_sin_inquilino(self):
+        self.assertTrue(self.CFG_G.lista)
+
+    def test_gmail_personal_se_rechaza(self):
+        # Sin `hd`: es una cuenta personal, aunque diga un correo de la escuela
+        for cambio in ({"hd": None}, {"email": "ana@gmail.com", "hd": None},
+                       {"hd": "otra-escuela.edu.mx", "email": "ana@otra-escuela.edu.mx"}):
+            with self.subTest(cambio=cambio), self.assertRaisesRegex(oauth.ErrorOAuth, "Gmail personal"):
+                oauth.validar_id_token(self.CFG_G, self.token(**cambio), "n-123")
+
+    def test_correo_sin_verificar_se_rechaza(self):
+        with self.assertRaisesRegex(oauth.ErrorOAuth, "verificado"):
+            oauth.validar_id_token(self.CFG_G, self.token(email_verified=False), "n-123")
+
+    def test_emisor_audiencia_y_nonce_distintos_se_rechazan(self):
+        for cambio, nonce in (({"iss": "https://evil.example.com"}, "n-123"), ({"aud": "otra-app"}, "n-123"), ({}, "otro")):
+            with self.subTest(cambio=cambio), self.assertRaises(oauth.ErrorOAuth):
+                oauth.validar_id_token(self.CFG_G, self.token(**cambio), nonce)
+
+    def test_url_de_google_con_pkce_y_sugerencia_de_dominio(self):
+        url = oauth.url_autorizacion(self.CFG_G, "estado-1", "nonce-1", "reto-1")
+        self.assertTrue(url.startswith(oauth.GOOGLE_AUTORIZACION + "?"))
+        for parte in ("hd=queretaro.tecnm.mx", "code_challenge=reto-1", "state=estado-1", "nonce=nonce-1"):
+            self.assertIn(parte, url)
+        self.assertEqual(self.CFG_G.url_token, oauth.GOOGLE_TOKEN)
+
+    def test_identidad_de_prueba_aplica_las_reglas_de_google(self):
+        self.assertEqual(oauth.identidad_de_prueba(self.CFG_G, "ana@queretaro.tecnm.mx", "Ana").proveedor, oauth.GOOGLE)
+        with self.assertRaises(oauth.ErrorOAuth):
+            oauth.identidad_de_prueba(self.CFG_G, "ana@gmail.com", "Ana")
+
+
 class EstadoYPkceTest(unittest.TestCase):
     def test_estado_firmado_ida_y_vuelta(self):
         cookie = oauth.firmar_estado("secreto-jwt-de-prueba-con-mas-de-32-bytes", "estado-1", "nonce-1", "verificador-1")

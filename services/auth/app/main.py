@@ -286,7 +286,7 @@ async def perfil(actual: UsuarioToken = Depends(requiere_rol(*TODOS)), db: Async
         "nombre": usuario.nombre,
         "email": usuario.email,
         "rol": usuario.rol,
-        "acceso": "microsoft" if usuario.proveedor_oauth else "contrasena",
+        "acceso": usuario.proveedor_oauth or "contrasena",   # "google", "microsoft" o "contrasena"
         "creado_en": usuario.creado_en,
         # El id de la sesión no se muestra: basta saber cuál es la actual
         "sesiones": [{"creada_en": s.creada_en, "expira_en": s.expira_en, "ip": s.ip,
@@ -420,7 +420,7 @@ async def oauth_inicio(correo_prueba: str | None = None, nombre_prueba: str | No
                        db: AsyncSession = Depends(get_db)):
     cfg = oauth.configuracion_oauth()
     if cfg.modo_prueba and correo_prueba:
-        # Solo pruebas locales: no pasa por Microsoft pero aplica las mismas reglas de dominio
+        # Solo pruebas locales: no pasa por Google/Microsoft pero aplica las mismas reglas de dominio
         try:
             identidad = oauth.identidad_de_prueba(cfg, correo_prueba, nombre_prueba or correo_prueba)
             return await _entrar_con_identidad(db, identidad)
@@ -431,57 +431,65 @@ async def oauth_inicio(correo_prueba: str | None = None, nombre_prueba: str | No
     estado, nonce = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     verificador, reto = oauth.par_pkce()
     respuesta = RedirectResponse(oauth.url_autorizacion(cfg, estado, nonce, reto), status_code=302)
-    # La cookie vuelve solo a /callback; Lax permite que llegue en la redirección desde Microsoft
+    # La cookie vuelve solo a /callback; Lax permite que llegue en la redirección desde el proveedor
     respuesta.set_cookie(oauth.NOMBRE_COOKIE, oauth.firmar_estado(configuracion().jwt_secret, estado, nonce, verificador),
                          max_age=oauth.MINUTOS_ESTADO * 60, httponly=True, samesite="lax",
                          secure=cfg.redireccion.startswith("https://"), path="/api/v1/auth/oauth")
     return respuesta
 
 
-@router_auth.get("/oauth/callback", summary="Microsoft regresa aquí después de que la persona entra")
+@router_auth.get("/oauth/proveedor", summary="Con qué cuenta entran los Observadores (pública, para el botón)")
+async def oauth_proveedor():
+    cfg = oauth.configuracion_oauth()
+    return {"proveedor": cfg.proveedor, "nombre": cfg.nombre, "configurado": cfg.lista or cfg.modo_prueba,
+            "dominios": list(cfg.dominios)}
+
+
+@router_auth.get("/oauth/callback", summary="Google o Microsoft regresan aquí después de que la persona entra")
 async def oauth_callback(request: Request, code: str | None = None, state: str | None = None,
                          error: str | None = None, db: AsyncSession = Depends(get_db)):
     cfg = oauth.configuracion_oauth()
     if error:
-        return _a_registro("No se completó el inicio de sesión con Microsoft; inténtalo de nuevo")
+        return _a_registro(f"No se completó el inicio de sesión con {cfg.nombre}; elige tu cuenta de la escuela "
+                           "y vuelve a intentarlo")
     try:
         datos = oauth.leer_estado(configuracion().jwt_secret, request.cookies.get(oauth.NOMBRE_COOKIE), state)
         if not code:
-            raise oauth.ErrorOAuth("Microsoft no devolvió el código de acceso; inténtalo de nuevo")
+            raise oauth.ErrorOAuth(f"{cfg.nombre} no devolvió el código de acceso; inténtalo de nuevo")
         # El código solo sirve junto con el secreto de la aplicación y el verificador PKCE
         async with httpx.AsyncClient(timeout=10) as cliente:
-            r = await cliente.post(f"{cfg.autoridad}/oauth2/v2.0/token", data={
+            r = await cliente.post(cfg.url_token, data={
                 "client_id": cfg.cliente_id, "client_secret": cfg.cliente_secreto,
                 "grant_type": "authorization_code", "code": code,
                 "redirect_uri": cfg.redireccion, "code_verifier": datos["pkce"],
             })
         if r.status_code != 200 or "id_token" not in r.json():
             log.warning("oauth_token_rechazado", estado=r.status_code)
-            raise oauth.ErrorOAuth("Microsoft no aceptó el inicio de sesión; inténtalo de nuevo")
+            raise oauth.ErrorOAuth(f"{cfg.nombre} no aceptó el inicio de sesión; inténtalo de nuevo")
         # La descarga de llaves de PyJWT es bloqueante: se hace en otro hilo
         identidad = await asyncio.to_thread(oauth.validar_id_token, cfg, r.json()["id_token"], datos["nonce"])
         return await _entrar_con_identidad(db, identidad)
     except oauth.ErrorOAuth as e:
         await registrar_evento(db, accion="LOGIN_FALLIDO", recurso="SESION", recurso_id=None, usuario=None,
-                               despues={"proveedor": oauth.PROVEEDOR}, motivo=str(e))
+                               despues={"proveedor": cfg.proveedor}, motivo=str(e))
         await db.commit()
         return _a_registro(str(e))
     except httpx.HTTPError:
-        return _a_registro("No se pudo contactar a Microsoft; inténtalo en unos minutos")
+        return _a_registro(f"No se pudo contactar a {cfg.nombre}; inténtalo en unos minutos")
 
 
 async def _entrar_con_identidad(db: AsyncSession, identidad: oauth.Identidad) -> RedirectResponse:
     """Busca o registra al Observador, abre su sesión y entrega un código de un solo uso."""
     usuario = (await db.execute(select(Usuario).where(
-        Usuario.proveedor_oauth == oauth.PROVEEDOR, Usuario.sujeto_oauth == identidad.sujeto))).scalar_one_or_none()
+        Usuario.proveedor_oauth == identidad.proveedor, Usuario.sujeto_oauth == identidad.sujeto))).scalar_one_or_none()
     if usuario is None:
         usuario = (await db.execute(select(Usuario).where(Usuario.email == identidad.email))).scalar_one_or_none()
         if usuario is not None and usuario.rol != OBSERVADOR:
-            # Una cuenta con contraseña (Administrador, Técnico, Consulta) no se toma con Microsoft
+            # Una cuenta con contraseña (Administrador, Técnico, Consulta) no se toma con Google/Microsoft
             raise oauth.ErrorOAuth("Ese correo ya tiene una cuenta con contraseña; entra desde la pantalla de inicio")
     if usuario is None:
         usuario = Usuario(nombre=identidad.nombre, email=identidad.email, hash_contrasena=None, rol=OBSERVADOR,
-                          activo=True, proveedor_oauth=oauth.PROVEEDOR, sujeto_oauth=identidad.sujeto,
+                          activo=True, proveedor_oauth=identidad.proveedor, sujeto_oauth=identidad.sujeto,
                           creado_en=datetime.now(timezone.utc))
         db.add(usuario)
         try:
@@ -492,10 +500,11 @@ async def _entrar_con_identidad(db: AsyncSession, identidad: oauth.Identidad) ->
         await db.refresh(usuario)
         await registrar_evento(db, accion="CREAR", recurso="USUARIO", recurso_id=usuario.id, usuario=SISTEMA,
                                despues=foto(usuario), motivo="Registro de Observador con cuenta institucional")
-    elif usuario.sujeto_oauth is None:
-        # Observador que aún no tenía ligada su cuenta de Microsoft
+    elif (usuario.proveedor_oauth, usuario.sujeto_oauth) != (identidad.proveedor, identidad.sujeto):
+        # Observador que aún no tenía ligada su cuenta, o que antes entraba con otro proveedor
+        # (p. ej. Microsoft y ahora Google): el proveedor ya confirmó que es dueño del correo
         antes = foto(usuario)
-        usuario.proveedor_oauth, usuario.sujeto_oauth = oauth.PROVEEDOR, identidad.sujeto
+        usuario.proveedor_oauth, usuario.sujeto_oauth = identidad.proveedor, identidad.sujeto
         await db.flush()
         await registrar_evento(db, accion="MODIFICAR", recurso="USUARIO", recurso_id=usuario.id, usuario=SISTEMA,
                                antes=antes, despues=foto(usuario), motivo="Cuenta institucional ligada")
@@ -513,7 +522,7 @@ async def _entrar_con_identidad(db: AsyncSession, identidad: oauth.Identidad) ->
                       expira_en=datetime.now(timezone.utc) + timedelta(seconds=oauth.SEGUNDOS_CANJE)))
     quien = UsuarioToken(id=usuario.id, nombre=usuario.nombre, rol=usuario.rol, sesion_id=sesion.id)
     await registrar_evento(db, accion="LOGIN", recurso="SESION", recurso_id=usuario.id, usuario=quien,
-                           despues={"email": usuario.email, "sesion_id": str(sesion.id), "proveedor": oauth.PROVEEDOR})
+                           despues={"email": usuario.email, "sesion_id": str(sesion.id), "proveedor": identidad.proveedor})
     await db.commit()
     # El código va en el fragmento (#): el navegador no lo envía a ningún servidor ni lo guarda en registros
     respuesta = RedirectResponse(f"/registro/listo#codigo={codigo}", status_code=302)

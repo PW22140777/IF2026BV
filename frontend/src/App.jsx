@@ -8,7 +8,7 @@ import { Mantenimientos } from './componentes/Mantenimientos'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
 import { Recorrido } from './componentes/Recorrido'
 import { Perfil } from './componentes/Perfil'
-import { BotonCuentaInstitucional, Registro } from './componentes/Registro'
+import { AyudaCuenta, BotonCuentaInstitucional, Registro, useIntentoFallido, useProveedorOAuth } from './componentes/Registro'
 import { Resumen } from './componentes/Resumen'
 import { Usuarios } from './componentes/Usuarios'
 import { RECURSOS } from './recursos'
@@ -61,6 +61,8 @@ function Login({ alEntrar, mensaje }) {
   const [contrasena, setContrasena] = useState('')
   const [error, setError] = useState(mensaje || '')
   const [enviando, setEnviando] = useState(false)
+  const intentoFallido = useIntentoFallido()   // volvió de Google o Microsoft sin entrar
+  const proveedor = useProveedorOAuth()
 
   async function entrar(e) {
     e.preventDefault()
@@ -99,7 +101,8 @@ function Login({ alEntrar, mensaje }) {
           {enviando ? 'Entrando…' : 'Iniciar sesión'}
         </button>
         <div className="separador-login"><span>¿Eres Observador?</span></div>
-        <BotonCuentaInstitucional texto="Entrar con tu cuenta institucional" />
+        {intentoFallido && <AyudaCuenta proveedor={proveedor} />}
+        <BotonCuentaInstitucional />
         <p className="nota-registro">
           Si es tu primera vez, <a href="/registro">conoce cómo registrarte</a>.
         </p>

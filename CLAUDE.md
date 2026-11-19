@@ -22,7 +22,7 @@ Roles:
 | `ADMINISTRADOR` | Todo, más auditoría completa, verificar integridad, restaurar eliminados y administrar usuarios |
 | `TECNICO` | Crear, modificar y eliminar recursos y sus propiedades, registrar consumos |
 | `CONSULTA` | Solo ver recursos, historial y resumen |
-| `OBSERVADOR` | Recorrer edificios, áreas, inventario y el estado de los servicios (vista «Recorrido») y comentar; no ve consumos, mantenimientos ni historial (`LECTORES_INTERNOS`). Se registra solo en `/registro` con Microsoft Entra ID (dominio `queretaro.tecnm.mx`); no tiene contraseña |
+| `OBSERVADOR` | Recorrer edificios, áreas, inventario y el estado de los servicios (vista «Recorrido») y comentar; no ve consumos, mantenimientos ni historial (`LECTORES_INTERNOS`). Se registra solo en `/registro` con su cuenta de Google de la escuela (dominio `queretaro.tecnm.mx`; `OAUTH_PROVEEDOR` también admite Microsoft); no tiene contraseña |
 
 ## Reglas de negocio (no romperlas)
 
@@ -34,7 +34,7 @@ Roles:
 - **Restaurar:** el padre (campus, edificio o área) debe estar activo.
 - **Propiedades flexibles:** cada recurso tiene una columna `propiedades` (JSONB) para datos según el tipo, p. ej. `{"btu": 12000}`. Se agregan, cambian o quitan con `PUT` y `DELETE /{recurso}/{id}/propiedades/{clave}`, y cada cambio queda en el historial.
 - **Tipos de elemento:** el tipo de un elemento de inventario debe existir en `tipos_elemento`, que define sus propiedades (`propiedades_definidas`: clave, etiqueta, tipo texto/numero/opcion/fecha/si_no, límites, opciones, requerida) y si usa medidas. `validar_elemento` revisa las propiedades al crear, modificar o cambiar una sola. Solo el Administrador cambia el catálogo (`roles_edicion=SOLO_ADMIN` en `crear_router_recurso`); la clave no cambia y no se elimina un tipo con elementos activos.
-- **Observadores y comentarios:** el rol `OBSERVADOR` solo se obtiene entrando con la cuenta institucional (`services/auth/app/oauth.py`: código + PKCE, `id_token` validado contra Microsoft, inquilino y dominio). Un correo con contraseña no entra por OAuth y un Observador no entra con contraseña. `comentarios-service` guarda los comentarios: los abre un Observador; Técnico y Administrador solo responden (`respuesta_a`); solo el Administrador oculta, con motivo (borrado lógico). `OAUTH_MODO_PRUEBA=true` es solo para pruebas en base local.
+- **Observadores y comentarios:** el rol `OBSERVADOR` solo se obtiene entrando con la cuenta institucional (`services/auth/app/oauth.py`: código + PKCE, `id_token` validado contra Google —`hd` y `email_verified`— o Microsoft —inquilino—, y el dominio). Un correo con contraseña no entra por OAuth y un Observador no entra con contraseña. `comentarios-service` guarda los comentarios: los abre un Observador; Técnico y Administrador solo responden (`respuesta_a`); solo el Administrador oculta, con motivo (borrado lógico). `OAUTH_MODO_PRUEBA=true` es solo para pruebas en base local.
 - **Mantenimientos:** `mantenimiento-service` guarda plantillas (`plantillas_mantenimiento`) y órdenes (`ordenes_mantenimiento`, técnicos en `ordenes_tecnicos`). Solo el Administrador cambia plantillas, asigna y cancela; los técnicos asignados inician y terminan. El estado del recurso no lo escribe este servicio: publica `orden_mantenimiento.iniciada/terminada.v1` con `estado_recurso_nuevo` e inmuebles/servicios lo aplican (`comun/mantenimientos.py`). Las listas de verificación usan `comun/propiedades.py`, igual que los tipos de elemento. Las evidencias son un esqueleto (501).
 - **Auditoría:** `audit_log` es de solo agregar (triggers bloquean `UPDATE`, `DELETE` y `TRUNCATE`). Cada registro tiene `hash = SHA-256(hash_anterior + JSON canónico)` y firma Ed25519. Solo `audit-service` escribe ahí.
 
@@ -42,7 +42,7 @@ Roles:
 
 ```text
 Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (una sola base)
-                 │                     └── auth ⇄ Microsoft Entra ID (registro de Observadores)
+                 │                     └── auth ⇄ Google (o Microsoft Entra ID): registro de Observadores
                  └── frontend (Nginx)              └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                        └────> servicios (reacciones)
 Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con correlation_id

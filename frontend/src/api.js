@@ -62,7 +62,14 @@ export async function iniciarSesion(email, contrasena) {
   return guardarSesion(datos)
 }
 
-// Observadores: tras entrar con Microsoft, el servidor entrega un código de un solo uso
+// Con qué cuenta entran los Observadores (Google o Microsoft); no necesita sesión
+export async function proveedorOAuth() {
+  const r = await fetch(`${BASE}/auth/oauth/proveedor`)
+  if (!r.ok) throw new Error('No se pudo consultar el inicio de sesión institucional')
+  return r.json()
+}
+
+// Observadores: tras entrar con Google o Microsoft, el servidor entrega un código de un solo uso
 // (en la URL #codigo=...) que aquí se cambia por la sesión de siempre
 export async function canjearCodigoOAuth(codigo) {
   const r = await fetch(`${BASE}/auth/oauth/canjear`, {

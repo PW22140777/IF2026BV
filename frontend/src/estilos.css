@@ -319,6 +319,11 @@ textarea { resize: vertical; }
 .nota-registro { margin: 0.75rem 0 0; font-size: 0.88rem; color: var(--grafito); text-align: center; }
 .lista-registro { margin: 0 0 1.25rem; padding-left: 1.1rem; }
 .lista-registro li { margin: 0.3rem 0; }
+/* Aviso para quien volvió de Microsoft sin entrar: cómo crear su cuenta */
+.aviso-ayuda { background: #fdf6dc; border-color: var(--senal-oscura); margin-bottom: 1rem; font-size: 0.9rem; }
+.aviso-ayuda p { margin: 0.35rem 0; }
+.aviso-ayuda ol { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; }
+.aviso-ayuda li { margin: 0.2rem 0; }
 
 /* ------------------------------------------------------------- mantenimientos */
 .rejilla-mantenimiento { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 1rem 2rem; }

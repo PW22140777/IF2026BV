@@ -57,6 +57,8 @@ SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "comentarios", "man
 # Sin token: el login y el inicio con la cuenta institucional (también cuentan en el límite de logins)
 RUTAS_PUBLICAS = {"/api/v1/auth/login", "/api/v1/auth/oauth/inicio", "/api/v1/auth/oauth/callback",
                   "/api/v1/auth/oauth/canjear"}
+# Sin token pero con el límite normal de la API: solo dice con qué cuenta entran los Observadores
+RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/auth/oauth/proveedor"}
 
 # Cabeceras que no se deben reenviar (son de cada conexión)
 SALTO_A_SALTO = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
@@ -209,7 +211,7 @@ async def proxy(request: Request, ruta: str):
         return _respuesta(r, cid, {"Content-Security-Policy": CSP_FRONTEND})
 
     # 3. Autenticación (las páginas de Swagger y el login son públicos)
-    if ruta_completa.startswith("/api/") and ruta_completa not in RUTAS_PUBLICAS and request.method != "OPTIONS":
+    if ruta_completa.startswith("/api/") and ruta_completa not in RUTAS_SIN_TOKEN and request.method != "OPTIONS":
         autorizacion = request.headers.get("authorization", "")
         if not autorizacion.lower().startswith("bearer "):
             return _error(401, "Falta el token de acceso", cid, **{"WWW-Authenticate": "Bearer"})

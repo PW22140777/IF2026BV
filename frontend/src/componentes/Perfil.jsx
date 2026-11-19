@@ -52,7 +52,8 @@ export function Perfil({ alCambiarContrasena }) {
   if (!perfil) return <div className="pagina"><section className="contenido"><p className="tenue">Cargando tu perfil…</p></section></div>
 
   const otras = perfil.sesiones.filter((s) => !s.actual).length
-  const conMicrosoft = perfil.acceso === 'microsoft'
+  const proveedores = { google: 'Google', microsoft: 'Microsoft' }
+  const conProveedor = proveedores[perfil.acceso]   // entra con Google o Microsoft, sin contraseña aquí
 
   return (
     <div className="pagina">
@@ -83,8 +84,8 @@ export function Perfil({ alCambiarContrasena }) {
 
         <div className="tarjeta-perfil">
           <h2>Cómo entras</h2>
-          {conMicrosoft ? (
-            <p>Con tu cuenta institucional de Microsoft. Tu contraseña se administra en Microsoft, no aquí.</p>
+          {conProveedor ? (
+            <p>Con tu cuenta institucional de {conProveedor}. Tu contraseña se administra en {conProveedor}, no aquí.</p>
           ) : (
             <>
               <p>Con tu correo y tu contraseña.</p>
