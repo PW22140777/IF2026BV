@@ -36,6 +36,8 @@ RECURSOS = {
 }
 RecursoComentable = Literal["EDIFICIO", "AREA", "INVENTARIO", "SERVICIO", "CONSUMO"]
 QUIENES_ESCRIBEN = (OBSERVADOR, TECNICO, ADMINISTRADOR)
+# El Observador no ve consumos: tampoco los comenta ni lee sus comentarios
+SOLO_INTERNOS = {"CONSUMO"}
 MAXIMO_POR_MINUTO = 10   # evita que una cuenta llene un recurso de comentarios
 
 
@@ -69,6 +71,11 @@ class ComentarioConAutor(ComentarioSalida):
     autor_rol: str
 
 
+def _revisar_alcance(recurso: str, usuario: UsuarioToken) -> None:
+    if recurso in SOLO_INTERNOS and usuario.rol == OBSERVADOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Los Observadores no pueden ver ni comentar consumos")
+
+
 def foto(comentario: Comentario) -> dict:
     """Estado del comentario para el historial."""
     return ComentarioSalida.model_validate(comentario).model_dump(mode="json")
@@ -86,6 +93,7 @@ async def listar(
     usuario: UsuarioToken = Depends(requiere_rol(*TODOS)),
     db: AsyncSession = Depends(get_db),
 ):
+    _revisar_alcance(recurso, usuario)
     if incluir_ocultos and usuario.rol != ADMINISTRADOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el Administrador puede ver comentarios ocultos")
     # Solo columnas de usuarios que este servicio puede leer (nunca el hash de la contraseña)
@@ -113,6 +121,7 @@ async def comentar(
     usuario: UsuarioToken = Depends(requiere_rol(*QUIENES_ESCRIBEN)),
     db: AsyncSession = Depends(get_db),
 ):
+    _revisar_alcance(datos.recurso, usuario)
     if datos.respuesta_a is None and usuario.rol != OBSERVADOR:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Los comentarios nuevos los escriben los Observadores; tú puedes responder a uno de ellos")

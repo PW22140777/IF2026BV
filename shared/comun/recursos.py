@@ -84,6 +84,7 @@ def crear_router_recurso(
     antes_de_restaurar: Gancho | None = None,
     propiedades_reservadas: frozenset[str] = frozenset(),
     roles_edicion: tuple[str, ...] = EDITORES,
+    roles_lectura: tuple[str, ...] = TODOS,
 ) -> APIRouter:
     """Construye el router de un recurso.
 
@@ -93,6 +94,7 @@ def crear_router_recurso(
     - antes_de_eliminar / antes_de_restaurar: reglas de negocio que pueden
       lanzar HTTPException para impedir la operación
     - roles_edicion: quién crea, modifica y elimina (por defecto Administrador y Técnico)
+    - roles_lectura: quién lista y ve registros (por defecto todos; LECTORES_INTERNOS deja fuera al Observador)
 
     Al cambiar una sola propiedad también se llama a `validar` con {"propiedades": ...},
     para que un recurso pueda revisar sus propiedades (p. ej. las de cada tipo de inventario).
@@ -117,7 +119,7 @@ def crear_router_recurso(
         incluir_eliminados: bool = Query(False, description="Solo Administrador"),
         limite: int = Query(200, ge=1, le=1000),
         desplazamiento: int = Query(0, ge=0),
-        usuario: UsuarioToken = Depends(requiere_rol(*TODOS)),
+        usuario: UsuarioToken = Depends(requiere_rol(*roles_lectura)),
         db: AsyncSession = Depends(get_db),
     ):
         if incluir_eliminados and usuario.rol != ADMINISTRADOR:
@@ -131,7 +133,7 @@ def crear_router_recurso(
     @router.get("/{id}", response_model=Salida, summary=f"Ver un registro de {etiqueta.lower()}")
     async def ver(
         id: int,
-        usuario: UsuarioToken = Depends(requiere_rol(*TODOS)),
+        usuario: UsuarioToken = Depends(requiere_rol(*roles_lectura)),
         db: AsyncSession = Depends(get_db),
     ):
         return await obtener(db, id, activo=usuario.rol != ADMINISTRADOR)

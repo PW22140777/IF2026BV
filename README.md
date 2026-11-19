@@ -15,7 +15,7 @@ Campus
 | Administrador | Todo, más ver la auditoría completa, verificar su integridad, restaurar registros eliminados y administrar usuarios |
 | Técnico | Crear, modificar y eliminar recursos y sus propiedades |
 | Consulta | Solo ver recursos, historial y el resumen para tomar decisiones |
-| Observador | Ver lo mismo que Consulta y comentar los recursos; se registra solo, con su cuenta institucional de Microsoft |
+| Observador | Recorrer el campus (edificios, áreas, inventario y el estado de los servicios) y comentar; no ve consumos, mantenimientos ni historial. Se registra solo, con su cuenta institucional de Microsoft |
 
 ## Arrancar el sistema
 
@@ -153,11 +153,19 @@ Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_c
 
 ## Observadores: registro con cuenta institucional y comentarios
 
+**Lo que ve un Observador: el «Recorrido».** Es su única pantalla (los demás roles la tienen como sección adicional):
+
+1. **Campus:** una calle con los edificios. Cada uno tiene la altura de sus niveles y cada ventana es un área, con el color de su estado; abajo, el estado de sus servicios. Las áreas sin edificio (canchas) son terrenos.
+2. **Edificio:** corte por pisos, de la planta baja hacia arriba; cada área es una puerta. Abajo, sus servicios y su tablero de avisos (comentarios).
+3. **Salón:** el inventario agrupado por tipo, con cuántas piezas hay en cada estado, los servicios del área y su tablero de avisos.
+
+En el servidor, consumos, órdenes y plantillas de mantenimiento, `/resumen/consumos`, `/resumen/mantenimientos` y el historial usan `LECTORES_INTERNOS` (Administrador, Técnico y Consulta): un Observador recibe 403 aunque escriba la URL. Un edificio o área sí puede mostrar el estado «En mantenimiento», porque es su propio estado.
+
 El rol **Observador** es para personas de la comunidad que quieren dar seguimiento a los inmuebles y reportar lo que ven. No lo crea el Administrador: cada quien se registra en **/registro** con su cuenta institucional de Microsoft (`@queretaro.tecnm.mx`) y no tiene contraseña.
 
 | Quién | En los comentarios puede |
 | --- | --- |
-| Observador | Leer, escribir comentarios en edificios, áreas, inventario, servicios y consumos, y responder dentro de un hilo |
+| Observador | Leer, escribir comentarios en edificios, áreas, inventario y servicios, y responder dentro de un hilo (los consumos no los ve ni los comenta) |
 | Técnico, Administrador | Leer y responder (opcional); no abren comentarios nuevos |
 | Administrador | Además, ocultar un comentario con motivo (borrado lógico: el texto queda en el historial) |
 | Consulta | Solo leer |
@@ -201,7 +209,7 @@ Vienen tres: «Correctivo de aire acondicionado» (por estado: malo o fuera de s
 | --- | --- |
 | Administrador | Asignar uno o más técnicos, cancelar con motivo, abrir ya las periódicas pendientes, y también atender cualquier orden |
 | Técnico | Iniciar y terminar las órdenes asignadas a él; programar una a mano desde el panel de un recurso (queda asignada a él) |
-| Consulta, Observador | Ver órdenes e historial |
+| Consulta | Ver órdenes e historial (el Observador no ve mantenimientos) |
 
 - Una orden automática nace sin técnicos: el Administrador la asigna. No puede haber dos órdenes abiertas de la misma plantilla para el mismo recurso.
 - El resultado «Parcial» solo termina la orden; si hace falta otra, se programa a mano.

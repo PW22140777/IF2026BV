@@ -27,6 +27,8 @@ OBSERVADOR = "OBSERVADOR"         # visualiza y comenta; entra solo con su cuent
 
 ROLES = (ADMINISTRADOR, TECNICO, CONSULTA, OBSERVADOR)
 TODOS = ROLES
+# El Observador ve inmuebles y el estado de los servicios, pero no consumos ni mantenimientos
+LECTORES_INTERNOS = (ADMINISTRADOR, TECNICO, CONSULTA)
 EDITORES = (ADMINISTRADOR, TECNICO)
 SOLO_ADMIN = (ADMINISTRADOR,)
 

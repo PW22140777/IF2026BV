@@ -84,7 +84,7 @@ function Comentario({ c, puedeOcultar, alOcultar }) {
   )
 }
 
-export function Comentarios({ recurso, id, usuario }) {
+export function Comentarios({ recurso, id, usuario, titulo = 'Comentarios' }) {
   const [comentarios, setComentarios] = useState(null)   // null = cargando
   const [error, setError] = useState('')
   const [respondiendo, setRespondiendo] = useState(null)  // id del comentario al que se responde
@@ -117,7 +117,7 @@ export function Comentarios({ recurso, id, usuario }) {
 
   return (
     <section className="seccion-detalle">
-      <h4>Comentarios{comentarios ? ` (${comentarios.length})` : ''}</h4>
+      <h4>{titulo}{comentarios ? ` (${comentarios.length})` : ''}</h4>
       {error && <p className="aviso aviso-error" role="alert">{error}</p>}
       {comentarios === null && !error && <p className="tenue">Cargando comentarios…</p>}
       {comentarios && originales.length === 0 && (

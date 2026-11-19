@@ -305,6 +305,16 @@ def probar_observadores(adm, tec, con, ed):
     assert any(x["motivo_eliminacion"] == "Prueba de moderación" for x in ocultos), ocultos
     paso("solo el Administrador oculta un comentario (con su hilo) y conserva el texto con su motivo")
 
+    for ruta in ("/api/v1/edificios", "/api/v1/areas", "/api/v1/inventario", "/api/v1/servicios", "/api/v1/resumen/servicios"):
+        assert cliente.get(ruta, headers=obs).status_code == 200, ruta
+    for ruta in ("/api/v1/consumos", "/api/v1/resumen/consumos", "/api/v1/mantenimientos/ordenes",
+                 "/api/v1/mantenimientos/plantillas", "/api/v1/resumen/mantenimientos", f"/api/v1/historial/EDIFICIO/{ed['id']}"):
+        assert cliente.get(ruta, headers=obs).status_code == 403, ruta
+        assert cliente.get(ruta, headers=con).status_code == 200, ruta
+    r = cliente.get("/api/v1/comentarios", headers=obs, params={"recurso": "CONSUMO", "recurso_id": 1})
+    assert r.status_code == 403, r.text
+    paso("el Observador ve inmuebles y el estado de los servicios, pero no consumos, mantenimientos ni historial")
+
 
 def probar_usuarios_y_sesiones(adm, tec, con):
     email = f"prueba-{sufijo.lower()}@escuela.mx"

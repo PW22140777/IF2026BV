@@ -14,7 +14,7 @@ from comun.db import fabrica_sesiones, get_db
 from comun.historial import registrar_evento
 from comun.modelos import Area, Campus, Consumo, Edificio, ServicioBasico
 from comun.recursos import SalidaBase, crear_router_recurso
-from comun.seguridad import SISTEMA, TODOS, requiere_rol
+from comun.seguridad import LECTORES_INTERNOS, SISTEMA, TODOS, requiere_rol
 
 log = structlog.get_logger()
 UNIDADES = {"AGUA": "m3", "LUZ": "kWh"}
@@ -212,6 +212,7 @@ router_consumos = crear_router_recurso(
     ruta="/consumos", etiqueta="Consumos", recurso="CONSUMO", modelo=Consumo,
     Crear=ConsumoCrear, Actualizar=ConsumoActualizar, Salida=ConsumoSalida,
     filtros=filtros_consumos, validar=validar_consumo,
+    roles_lectura=LECTORES_INTERNOS,   # el Observador ve el estado de los servicios, no sus consumos
 )
 
 
@@ -223,7 +224,7 @@ router_resumen = APIRouter(prefix="/resumen", tags=["Resumen"])
 async def resumen_consumos(
     meses: int = Query(12, ge=1, le=60),
     campus_id: int | None = Query(None, description="Vacío = todos los campus"),
-    _=Depends(requiere_rol(*TODOS)),
+    _=Depends(requiere_rol(*LECTORES_INTERNOS)),
     db: AsyncSession = Depends(get_db),
 ):
     hoy = date.today()

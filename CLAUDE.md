@@ -22,7 +22,7 @@ Roles:
 | `ADMINISTRADOR` | Todo, más auditoría completa, verificar integridad, restaurar eliminados y administrar usuarios |
 | `TECNICO` | Crear, modificar y eliminar recursos y sus propiedades, registrar consumos |
 | `CONSULTA` | Solo ver recursos, historial y resumen |
-| `OBSERVADOR` | Ver como Consulta y comentar recursos. Se registra solo en `/registro` con Microsoft Entra ID (dominio `queretaro.tecnm.mx`); no tiene contraseña |
+| `OBSERVADOR` | Recorrer edificios, áreas, inventario y el estado de los servicios (vista «Recorrido») y comentar; no ve consumos, mantenimientos ni historial (`LECTORES_INTERNOS`). Se registra solo en `/registro` con Microsoft Entra ID (dominio `queretaro.tecnm.mx`); no tiene contraseña |
 
 ## Reglas de negocio (no romperlas)
 
@@ -54,7 +54,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/auth/` | Login con JWT, usuarios y roles. Crea los usuarios de demostración si la tabla está vacía. |
 | `services/inmuebles/` | Campus, edificios, áreas, inventario y el catálogo `/tipos-elemento`, y `/resumen/inmuebles`. |
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
-| `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario, servicios y consumos; respuestas y moderación. |
+| `services/comentarios/` | Comentarios de los Observadores sobre edificios, áreas, inventario y servicios (los consumos solo entre roles internos); respuestas y moderación. |
 | `services/mantenimiento/` | Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales; técnicos asignados; iniciar y terminar con lista de verificación. |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |
 | `shared/comun/` | Paquete común instalado en cada imagen (ver abajo). |
@@ -66,7 +66,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 ### Paquete `shared/comun`
 
 - `app.py` → `crear_app()`: todos los servicios arrancan así (health, métricas, trazas, Consul, publicador de outbox, consumidores, Swagger).
-- `recursos.py` → `crear_router_recurso()`: CRUD genérico con filtros, propiedades, borrado lógico, restauración e historial. **Para un recurso nuevo usa esto** con ganchos `validar`, `antes_de_eliminar` y `antes_de_restaurar`.
+- `recursos.py` → `crear_router_recurso()`: CRUD genérico con filtros, propiedades, borrado lógico, restauración e historial. **Para un recurso nuevo usa esto** con ganchos `validar`, `antes_de_eliminar` y `antes_de_restaurar`; `roles_edicion` y `roles_lectura` limitan quién escribe y quién lee.
 - `seguridad.py` → `requiere_rol(*TODOS | *EDITORES | *SOLO_ADMIN)`; en cada petición revisa en la tabla `sesiones` que la sesión del JWT siga abierta y usa el rol que dice la base, no el del token. Con una contraseña temporal responde 403, salvo en las rutas marcadas con `aunque_deba_cambiar_contrasena=True`. `SISTEMA` es el usuario de las acciones automáticas.
 - `historial.py` → `registrar_evento()`; el tipo de evento es `recurso.accion.v1`, p. ej. `edificio.creado.v1`.
 - `mensajeria.py` → publicador de outbox y `consumidor()` con 3 reintentos y cola `eventos.fallidos`. Importa `aio_pika`, así que solo se carga si hay `RABBITMQ_URL`.

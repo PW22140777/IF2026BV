@@ -29,7 +29,7 @@ from comun.modelos import (
 from comun.propiedades import revisar_valores
 from comun.recursos import crear_router_recurso
 from comun.seguridad import (
-    ADMINISTRADOR, EDITORES, SISTEMA, SOLO_ADMIN, TECNICO, TODOS, UsuarioToken, requiere_rol,
+    ADMINISTRADOR, EDITORES, LECTORES_INTERNOS, SISTEMA, SOLO_ADMIN, TECNICO, UsuarioToken, requiere_rol,
 )
 
 from . import evidencias
@@ -227,7 +227,7 @@ async def plantilla_antes_de_eliminar(db: AsyncSession, plantilla: PlantillaMant
 router_plantillas = crear_router_recurso(
     ruta="/mantenimientos/plantillas", etiqueta="Plantillas de mantenimiento", recurso="PLANTILLA_MANTENIMIENTO",
     modelo=PlantillaMantenimiento, Crear=PlantillaCrear, Actualizar=PlantillaActualizar, Salida=PlantillaSalida,
-    filtros=filtros_plantillas, validar=validar_plantilla, roles_edicion=SOLO_ADMIN,
+    filtros=filtros_plantillas, validar=validar_plantilla, roles_edicion=SOLO_ADMIN, roles_lectura=LECTORES_INTERNOS,
     antes_de_eliminar=plantilla_antes_de_eliminar,
 )
 
@@ -243,7 +243,7 @@ async def listar_ordenes(
     recurso_id: int | None = None,
     mias: bool = Query(False, description="Solo las asignadas a quien consulta"),
     limite: int = Query(200, ge=1, le=1000),
-    usuario: UsuarioToken = Depends(requiere_rol(*TODOS)),
+    usuario: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)),
     db: AsyncSession = Depends(get_db),
 ):
     consulta = select(OrdenMantenimiento).where(OrdenMantenimiento.eliminado_en.is_(None))
@@ -263,7 +263,7 @@ async def listar_ordenes(
 
 
 @router_ordenes.get("/{id}", response_model=OrdenDetalle, summary="Una orden de mantenimiento")
-async def ver_orden(id: int, _: UsuarioToken = Depends(requiere_rol(*TODOS)), db: AsyncSession = Depends(get_db)):
+async def ver_orden(id: int, _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)), db: AsyncSession = Depends(get_db)):
     return (await _detalles(db, [await _orden_abierta(db, id)]))[0]
 
 
@@ -377,7 +377,7 @@ async def cancelar(id: int, datos: Cancelacion, usuario: UsuarioToken = Depends(
 
 # Evidencias: esqueleto. Responden 501 hasta que se defina dónde se guardan los archivos (evidencias.py)
 @router_ordenes.get("/{id}/evidencias", summary="Evidencias de la orden (todavía no disponible)")
-async def listar_evidencias(id: int, _: UsuarioToken = Depends(requiere_rol(*TODOS)), db: AsyncSession = Depends(get_db)):
+async def listar_evidencias(id: int, _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)), db: AsyncSession = Depends(get_db)):
     await _orden_abierta(db, id)
     return {"disponible": evidencias.almacen() is not None, "evidencias": [], "mensaje": evidencias.MENSAJE_NO_DISPONIBLE}
 
@@ -412,7 +412,7 @@ def _del_campus(campus_id: int):
 @router_resumen.get("/mantenimientos", summary="Indicadores de mantenimiento para el tablero")
 async def resumen_mantenimientos(
     campus_id: int | None = Query(None, description="Vacío = todos los campus"),
-    _: UsuarioToken = Depends(requiere_rol(*TODOS)),
+    _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)),
     db: AsyncSession = Depends(get_db),
 ):
     o = OrdenMantenimiento

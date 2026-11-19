@@ -6,6 +6,7 @@ import { BarraSuperior } from './componentes/BarraSuperior'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
 import { Mantenimientos } from './componentes/Mantenimientos'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
+import { Recorrido } from './componentes/Recorrido'
 import { Perfil } from './componentes/Perfil'
 import { BotonCuentaInstitucional, Registro } from './componentes/Registro'
 import { Resumen } from './componentes/Resumen'
@@ -13,16 +14,19 @@ import { Usuarios } from './componentes/Usuarios'
 import { RECURSOS } from './recursos'
 
 const LECTORES = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA', 'OBSERVADOR']
+// El Observador solo recorre el campus: sin tablas, consumos ni mantenimientos
+const INTERNOS = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA']
 
-// Menú: qué ve cada rol
+// Menú: qué ve cada rol (la primera sección visible es la de inicio)
 const SECCIONES = [
-  { id: 'resumen', titulo: 'Resumen', roles: LECTORES },
-  { id: 'edificios', titulo: 'Edificios', roles: LECTORES, grupo: 'Inmuebles' },
-  { id: 'areas', titulo: 'Áreas', roles: LECTORES, grupo: 'Inmuebles' },
-  { id: 'inventario', titulo: 'Inventario', roles: LECTORES, grupo: 'Inmuebles' },
-  { id: 'servicios', titulo: 'Agua y luz', roles: LECTORES, grupo: 'Servicios básicos' },
-  { id: 'consumos', titulo: 'Consumos', roles: LECTORES, grupo: 'Servicios básicos' },
-  { id: 'mantenimientos', titulo: 'Órdenes', roles: LECTORES, grupo: 'Mantenimiento' },
+  { id: 'resumen', titulo: 'Resumen', roles: INTERNOS },
+  { id: 'recorrido', titulo: 'Recorrido', roles: LECTORES },
+  { id: 'edificios', titulo: 'Edificios', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'areas', titulo: 'Áreas', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'inventario', titulo: 'Inventario', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'servicios', titulo: 'Agua y luz', roles: INTERNOS, grupo: 'Servicios básicos' },
+  { id: 'consumos', titulo: 'Consumos', roles: INTERNOS, grupo: 'Servicios básicos' },
+  { id: 'mantenimientos', titulo: 'Órdenes', roles: INTERNOS, grupo: 'Mantenimiento' },
   { id: 'tipos_elemento', titulo: 'Tipos de elemento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'plantillas_mantenimiento', titulo: 'Plantillas de mantenimiento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'auditoria', titulo: 'Auditoría', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
@@ -163,16 +167,19 @@ export default function App() {
     return <CambiarContrasena obligatorio alSalir={() => setSesion(null)} />
   }
   const visibles = SECCIONES.filter((s) => s.roles.includes(usuario.rol))
+  // Si la sección elegida no es de este rol (p. ej. «Resumen» para un Observador), se abre la primera que sí
+  const actual = ['perfil', 'contrasena'].includes(seccion) || visibles.some((s) => s.id === seccion) ? seccion : visibles[0].id
   const grupos = [...new Set(visibles.map((s) => s.grupo || ''))]
 
   function pagina() {
-    if (seccion === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
-    if (seccion === 'auditoria') return <Auditoria />
-    if (seccion === 'mantenimientos') return <Mantenimientos usuario={usuario} idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
-    if (seccion === 'usuarios') return <Usuarios usuario={usuario} />
-    if (seccion === 'contrasena') return <CambiarContrasena />
-    if (seccion === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
-    return <PaginaRecurso config={RECURSOS[seccion]} usuario={usuario} campusActivo={campusActivo}
+    if (actual === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
+    if (actual === 'recorrido') return <div className="pagina"><Recorrido usuario={usuario} campusActivo={campusActivo} /></div>
+    if (actual === 'auditoria') return <Auditoria />
+    if (actual === 'mantenimientos') return <Mantenimientos usuario={usuario} idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
+    if (actual === 'usuarios') return <Usuarios usuario={usuario} />
+    if (actual === 'contrasena') return <CambiarContrasena />
+    if (actual === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
+    return <PaginaRecurso config={RECURSOS[actual]} usuario={usuario} campusActivo={campusActivo}
                           idInicial={idInicial} alUsarIdInicial={usarIdInicial} alAbrir={abrir} />
   }
 
@@ -209,7 +216,7 @@ export default function App() {
               <ul id={idLista} hidden={!abierto}>
                 {opciones.map((s) => (
                   <li key={s.id}>
-                    <button type="button" aria-current={seccion === s.id ? 'page' : undefined}
+                    <button type="button" aria-current={actual === s.id ? 'page' : undefined}
                             onClick={() => { setIdInicial(null); setSeccion(s.id); setMenuAbierto(false) }}>
                       {s.titulo}
                     </button>
