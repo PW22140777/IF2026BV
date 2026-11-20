@@ -15,7 +15,8 @@
   --foco: #1f5f99;
 
   --radio: 6px;
-  --alto-barra: 3.5rem;   /* barra superior; el panel de detalle se acomoda debajo */
+  --alto-barra: 3.5rem;
+  --ancho-panel: clamp(340px, 30vw, 460px);   /* panel de detalle: ancho fijo según la pantalla */   /* barra superior; el panel de detalle se acomoda debajo */
   --fuente: 'Public Sans', system-ui, sans-serif;
   color-scheme: light;
 }
@@ -207,7 +208,7 @@ textarea { resize: vertical; }
 
 /* ------------------------------------------------------------------ páginas */
 .pagina { display: grid; grid-template-columns: 1fr; min-height: 100vh; }
-.pagina.con-panel { grid-template-columns: minmax(0, 1fr) 400px; }
+.pagina.con-panel { grid-template-columns: minmax(0, 1fr) var(--ancho-panel); }
 .contenido { padding: 2rem 2.25rem; min-width: 0; }
 .encabezado-pagina { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
 
@@ -248,18 +249,31 @@ textarea { resize: vertical; }
 .paginacion { display: flex; align-items: center; gap: 1rem; margin-top: 1rem; }
 
 /* ------------------------------------------------------------ panel detalle */
-/* En computadora el panel es parte de la página: crece con su contenido y se desplaza con
-   ella, sin una barra de desplazamiento propia (antes era una «página dentro de otra») */
+/* Panel de detalle: tamaño fijo (ancho según la pantalla, alto de la ventana) y todo su
+   contenido se ajusta a ese ancho. Nada lo puede ensanchar: los textos largos, aunque no
+   tengan espacios (claves, enlaces, valores del historial), se parten en varias líneas.
+   Si el contenido es más alto que la ventana, el panel se desplaza solo hacia abajo. */
 .panel-detalle {
   background: var(--superficie);
   border-left: 1px solid var(--linea);
   padding: 1.5rem;
+  position: sticky;
+  top: var(--alto-barra);   /* queda debajo de la barra superior */
+  height: calc(100vh - var(--alto-barra));
+  overflow-y: auto;
+  overflow-x: hidden;
   min-width: 0;
+  overflow-wrap: anywhere;   /* se hereda: cualquier texto se parte donde haga falta */
 }
+.panel-detalle :is(div, section, form, header, li, dd, dt, h2, h3, h4, p, label, fieldset) { min-width: 0; }
+.panel-detalle :is(input, select, textarea, img, table) { max-width: 100%; }
+.panel-detalle table { table-layout: fixed; width: 100%; }
+.panel-detalle :is(pre, code) { white-space: pre-wrap; overflow-wrap: anywhere; }
 .detalle-encabezado { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-.detalle-encabezado h2 { margin: 0; font-size: 1.3rem; }
+.detalle-encabezado h2 { margin: 0; font-size: 1.3rem; min-width: 0; }
+.detalle-encabezado .boton-texto { flex: none; }   /* «Cerrar» nunca se sale del panel */
 
-.ficha { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1rem; margin: 1.25rem 0 0; }
+.ficha { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; margin: 1.25rem 0 0; }
 .ficha dt { font-size: 0.8rem; color: var(--grafito); }
 .ficha dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .ficha-tecnica { grid-template-columns: 1fr; font-size: 0.85rem; }

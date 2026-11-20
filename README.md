@@ -129,7 +129,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON
 - «Cerrar sesión» invalida el token en el servidor, aunque alguien lo haya copiado.
 - En «Mi perfil» (GET /auth/perfil) cada quien ve sus datos, lo que puede hacer su rol, cómo entra y sus sesiones abiertas, y puede cerrar las demás con POST /auth/cerrar-otras-sesiones (la actual sigue abierta).
 - «Mi perfil», «Cambiar contraseña» y «Cerrar sesión» están en el menú del usuario, a la derecha de la barra superior; ahí también está el selector de campus.
-- En computadora, el panel de detalle (ver y editar un registro) es parte de la página: crece con su contenido y se desplaza con ella, sin barra propia; al abrir un registro desde abajo de una lista larga, la página sube hasta el panel (`frontend/src/panel.js`). En tableta y teléfono flota encima de la lista y ahí sí se desplaza solo.
+- El panel de detalle (ver y editar un registro) tiene tamaño fijo: en computadora, de 340 a 460 px de ancho según la pantalla (`--ancho-panel`) y el alto de la ventana; en tableta y teléfono flota encima de la lista. Todo su contenido se ajusta a ese ancho: los textos largos, aunque no tengan espacios (claves, enlaces, valores del historial), se parten en varias líneas, así que nada ensancha la página. Si el contenido es más alto, solo el panel se desplaza hacia abajo.
 - La sesión se cierra tras 30 minutos sin actividad y, como máximo, 4 horas después de entrar (`SESION_INACTIVIDAD_MINUTOS` y `SESION_MAXIMA_HORAS` en `.env`). Mientras trabajas, el frontend la renueva sola con `/auth/renovar`.
 
 Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_contrasena` de `usuarios`: nunca el hash de la contraseña.
