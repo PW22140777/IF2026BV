@@ -248,6 +248,17 @@ export function Mantenimientos({ usuario, idInicial = null, alUsarIdInicial }) {
     api(`/mantenimientos/ordenes/${idInicial}`).then(setSeleccion).catch(() => {}).finally(() => alUsarIdInicial?.())
   }, [idInicial, alUsarIdInicial])
 
+  async function programarAhora() {
+    setAviso('')
+    try {
+      const r = await api('/mantenimientos/programar', { metodo: 'POST' })
+      setAviso(r.creadas ? `Se abrieron ${r.creadas} órdenes periódicas.` : 'No había órdenes periódicas pendientes.')
+      cargar()
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
   function actualizar(nueva) {
     setSeleccion(nueva)
     setOrdenes((os) => os.map((o) => (o.id === nueva.id ? nueva : o)))
@@ -258,6 +269,9 @@ export function Mantenimientos({ usuario, idInicial = null, alUsarIdInicial }) {
       <section className="contenido">
         <header className="encabezado-pagina">
           <h1>Mantenimientos</h1>
+          {usuario.rol === 'ADMINISTRADOR' && (
+            <button type="button" className="boton-secundario" onClick={programarAhora}>Abrir órdenes periódicas ahora</button>
+          )}
         </header>
         <div className="barra-filtros" role="group" aria-label="Filtrar órdenes">
           {FILTROS.filter(([id]) => id !== 'mias' || ['TECNICO', 'ADMINISTRADOR'].includes(usuario.rol)).map(([id, texto]) => (

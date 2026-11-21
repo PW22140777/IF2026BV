@@ -43,6 +43,8 @@ log = structlog.get_logger()
 # Tabla de cada recurso: solo se lee, para saber si existe y a qué plantillas aplica
 MODELOS = {"EDIFICIO": Edificio, "AREA": Area, "INVENTARIO": ElementoInventario, "SERVICIO": ServicioBasico}
 ABIERTAS = ("PROGRAMADA", "EN_CURSO")
+CANDADO_PROGRAMADOR = 8_008      # pg_advisory_xact_lock: una sola réplica programa a la vez
+INTERVALO_PROGRAMADOR_S = 3600   # revisa las plantillas periódicas cada hora
 
 
 # ----------------------------------------------------------------- utilidades
@@ -384,6 +386,56 @@ router_evidencias = crear_router_adjuntos(
 
 
 # ---------------------------------------------------- órdenes automáticas
+async def generar_periodicas() -> int:
+    """Abre las órdenes de las plantillas periódicas que ya tocan. Devuelve cuántas creó."""
+    creadas = 0
+    async with fabrica_sesiones()() as db:
+        async with db.begin():
+            # Candado de la transacción (sirve con el pooler): varias réplicas no duplican órdenes
+            await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": CANDADO_PROGRAMADOR})
+            plantillas = (await db.execute(select(PlantillaMantenimiento).where(
+                PlantillaMantenimiento.disparo == "PERIODICO", PlantillaMantenimiento.activa.is_(True),
+                PlantillaMantenimiento.eliminado_en.is_(None)))).scalars().all()
+            for plantilla in plantillas:
+                modelo = MODELOS[plantilla.recurso]
+                consulta = select(modelo.id).where(modelo.eliminado_en.is_(None))
+                if plantilla.recurso == "INVENTARIO" and plantilla.tipo_elemento:
+                    consulta = consulta.where(ElementoInventario.tipo == plantilla.tipo_elemento)
+                limite = datetime.now(timezone.utc) - timedelta(days=plantilla.cada_dias)
+                for recurso_id in (await db.execute(consulta)).scalars():
+                    ultima = (await db.execute(select(func.max(OrdenMantenimiento.terminada_en)).where(
+                        OrdenMantenimiento.plantilla_id == plantilla.id, OrdenMantenimiento.recurso_id == recurso_id,
+                        OrdenMantenimiento.estado == "TERMINADA"))).scalar_one()
+                    if ultima is not None and ultima > limite:
+                        continue
+                    if await _abrir_orden(db, plantilla, recurso_id, "PERIODICO", SISTEMA, []):
+                        creadas += 1
+    if creadas:
+        log.info("ordenes_periodicas_creadas", total=creadas)
+    return creadas
+
+
+async def programador(detener: asyncio.Event) -> None:
+    """Tarea de fondo: revisa las plantillas periódicas al arrancar y después cada hora."""
+    while not detener.is_set():
+        try:
+            await generar_periodicas()
+        except Exception:   # un error no debe detener la tarea: se reintenta en la siguiente vuelta
+            log.exception("programador_fallo")
+        try:
+            await asyncio.wait_for(detener.wait(), timeout=INTERVALO_PROGRAMADOR_S)
+        except asyncio.TimeoutError:
+            pass
+
+
+router_programar = APIRouter(prefix="/mantenimientos", tags=["Órdenes de mantenimiento"])
+
+
+@router_programar.post("/programar", summary="Abrir ya las órdenes periódicas que tocan (Administrador)")
+async def programar_ahora(_: UsuarioToken = Depends(requiere_rol(*SOLO_ADMIN))):
+    return {"creadas": await generar_periodicas()}
+
+
 async def al_cambiar_recurso(evento: dict) -> None:
     """Un recurso cambió: abre órdenes por estado o cancela las abiertas si se eliminó."""
     from comun.idempotencia import marcar_procesado
@@ -424,6 +476,7 @@ def _tareas():
     return [
         consumidor("mantenimiento.recursos", ["edificio.*.v1", "area.*.v1", "inventario.*.v1", "servicio.*.v1"],
                    al_cambiar_recurso),
+        programador,
     ]
 
 
@@ -431,6 +484,6 @@ app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
-    routers=[router_plantillas, router_ordenes, router_evidencias],
+    routers=[router_plantillas, router_ordenes, router_evidencias, router_programar],
     consumidores=_tareas() if configuracion().rabbitmq_url else (),
 )
