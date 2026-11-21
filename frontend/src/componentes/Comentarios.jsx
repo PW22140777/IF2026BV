@@ -98,7 +98,20 @@ function Escribir({ etiqueta, boton, alEnviar, alCancelar, conFotos = false }) {
   )
 }
 
-function Comentario({ c }) {
+function Comentario({ c, puedeOcultar, alOcultar }) {
+  const [ocultando, setOcultando] = useState(false)
+  const [motivo, setMotivo] = useState('')
+  const [error, setError] = useState('')
+
+  async function ocultar(e) {
+    e.preventDefault()
+    try {
+      await alOcultar(c.id, motivo)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   return (
     <article className="comentario">
       <header>
@@ -118,6 +131,20 @@ function Comentario({ c }) {
           ))}
         </ul>
       )}
+      {puedeOcultar && !ocultando && (
+        <button type="button" className="boton-texto" onClick={() => setOcultando(true)}>Ocultar</button>
+      )}
+      {ocultando && (
+        <form className="confirmar-eliminar" onSubmit={ocultar}>
+          <label htmlFor={`motivo-ocultar-${c.id}`}>¿Por qué se oculta? Queda en el historial.</label>
+          <input id={`motivo-ocultar-${c.id}`} minLength={5} required value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+          <div className="acciones">
+            <button type="submit" className="boton-peligro">Ocultar comentario</button>
+            <button type="button" className="boton-secundario" onClick={() => setOcultando(false)}>Cancelar</button>
+          </div>
+          {error && <p className="aviso aviso-error" role="alert">{error}</p>}
+        </form>
+      )}
     </article>
   )
 }
@@ -129,7 +156,8 @@ export function Comentarios({ recurso, id, usuario, titulo = 'Comentarios' }) {
 
   const rol = usuario.rol
   const abreComentarios = rol === 'OBSERVADOR'
-  const responde = rol === 'OBSERVADOR'
+  const responde = ['OBSERVADOR', 'TECNICO', 'ADMINISTRADOR'].includes(rol)
+  const esAdmin = rol === 'ADMINISTRADOR'
 
   const cargar = useCallback(() => {
     api('/comentarios', { consulta: { recurso, recurso_id: id } })
@@ -155,6 +183,11 @@ export function Comentarios({ recurso, id, usuario, titulo = 'Comentarios' }) {
     cargar()
   }
 
+  async function ocultar(comentarioId, motivo) {
+    await api(`/comentarios/${comentarioId}`, { metodo: 'DELETE', cuerpo: { motivo } })
+    cargar()
+  }
+
   const originales = (comentarios || []).filter((c) => c.respuesta_a === null)
   const respuestasDe = (cid) => (comentarios || []).filter((c) => c.respuesta_a === cid)
 
@@ -171,11 +204,11 @@ export function Comentarios({ recurso, id, usuario, titulo = 'Comentarios' }) {
       <ol className="lista-comentarios">
         {originales.map((c) => (
           <li key={c.id}>
-            <Comentario c={c} />
+            <Comentario c={c} puedeOcultar={esAdmin} alOcultar={ocultar} />
             {respuestasDe(c.id).length > 0 && (
               <ol className="respuestas">
                 {respuestasDe(c.id).map((r) => (
-                  <li key={r.id}><Comentario c={r} /></li>
+                  <li key={r.id}><Comentario c={r} puedeOcultar={esAdmin} alOcultar={ocultar} /></li>
                 ))}
               </ol>
             )}

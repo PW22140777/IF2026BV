@@ -123,6 +123,7 @@ def main():
                     json={"motivo": "Limpieza de la prueba"}).raise_for_status()
     paso("cada tipo de elemento define sus propiedades y la API las valida; solo el Administrador cambia el catálogo")
 
+    probar_observadores(adm, tec, con, ed)
     probar_archivos(adm, tec, con, ed)
 
     internet = cliente.post("/api/v1/servicios", headers=tec,
@@ -168,6 +169,19 @@ def main():
 
     probar_usuarios_y_sesiones(adm, tec, con)
     print("Todo funcionó.")
+
+
+def entrar_como_observador(correo, nombre):
+    """Registro con cuenta institucional en modo de prueba (OAUTH_MODO_PRUEBA=true, solo base local)."""
+    r = cliente.get("/api/v1/auth/oauth/inicio", params={"correo_prueba": correo, "nombre_prueba": nombre},
+                    follow_redirects=False)
+    assert r.status_code == 302, r.text
+    destino = r.headers["location"]
+    if "#codigo=" not in destino:
+        return None, destino
+    canje = cliente.post("/api/v1/auth/oauth/canjear", json={"codigo": destino.split("#codigo=")[1]})
+    canje.raise_for_status()
+    return {"Authorization": f"Bearer {canje.json()['access_token']}"}, canje.json()
 
 
 # Archivos mínimos: archivos-service decide el tipo por los primeros bytes
@@ -226,6 +240,75 @@ def probar_archivos(adm, tec, con, ed):
     assert cliente.get(url).status_code == 404
     esperar(lambda: len(cliente.get(f"/api/v1/historial/ARCHIVO/{adjunto['id']}", headers=adm).json()) >= 2,
             "quitar pide motivo, borra el archivo del almacén y la ficha queda en el historial (ARCHIVO)")
+
+
+def probar_observadores(adm, tec, con, ed):
+    correo = f"obs-{sufijo.lower()}@queretaro.tecnm.mx"
+    obs, datos = entrar_como_observador(correo, f"Observadora {sufijo}")
+    if obs is None:
+        paso("(se omiten los Observadores: activa OAUTH_MODO_PRUEBA=true en la base local para probarlos)")
+        return
+    assert datos["usuario"]["rol"] == "OBSERVADOR", datos
+    otra, destino = entrar_como_observador(f"intrusa-{sufijo.lower()}@gmail.com", "Intrusa")
+    assert otra is None and destino.startswith("/registro?error="), destino
+    r = cliente.post("/api/v1/auth/login", data={"username": correo, "password": "Cualquier#Cosa-2026"})
+    assert r.status_code == 401, r.text
+    paso("un Observador se registra solo con un correo institucional y no puede entrar con contraseña")
+
+    assert cliente.get(f"/api/v1/edificios/{ed['id']}", headers=obs).status_code == 200
+    assert cliente.patch(f"/api/v1/edificios/{ed['id']}", headers=obs, json={"niveles": 3}).status_code == 403
+    base = {"recurso": "EDIFICIO", "recurso_id": ed["id"]}
+    c = cliente.post("/api/v1/comentarios", headers=obs, json={**base, "texto": "La rampa de acceso está rota"})
+    c.raise_for_status()
+    assert cliente.post("/api/v1/comentarios", headers=tec, json={**base, "texto": "Comentario nuevo"}).status_code == 403
+    assert cliente.post("/api/v1/comentarios", headers=con, json={**base, "texto": "Hola"}).status_code == 403
+    assert cliente.post("/api/v1/comentarios", headers=obs,
+                        json={"recurso": "EDIFICIO", "recurso_id": 999999, "texto": "x"}).status_code == 422
+    respuesta = cliente.post("/api/v1/comentarios", headers=tec,
+                             json={**base, "texto": "Gracias, ya se reportó", "respuesta_a": c.json()["id"]})
+    respuesta.raise_for_status()
+    lista = cliente.get("/api/v1/comentarios", headers=con, params=base).json()
+    assert [x["autor_rol"] for x in lista] == ["OBSERVADOR", "TECNICO"], lista
+    paso("el Observador comenta un edificio, el Técnico responde y Consulta solo lee")
+
+    # Fotos en los comentarios: solo el Observador, de 1 a 4, solo imágenes; si una falla no queda nada
+    def con_fotos(quien, archivos, texto="Así está la rampa"):
+        return cliente.post("/api/v1/comentarios/con-fotos", headers=quien,
+                            data={**{k: str(v) for k, v in base.items()}, "texto": texto},
+                            files=[("fotos", a) for a in archivos])
+    png = ("rampa.png", PNG_PRUEBA, "image/png")
+    antes = len(cliente.get("/api/v1/comentarios", headers=con, params=base).json())
+    r = con_fotos(obs, [png, ("detalle.jpg", JPG_PRUEBA, "image/jpeg")])
+    assert r.status_code == 201 and len(r.json()["fotos"]) == 2, r.text
+    assert con_fotos(obs, [png] * 5).status_code == 422
+    assert con_fotos(tec, [png]).status_code == 403
+    assert con_fotos(obs, [png, ("nota.png", b"<html>no</html>", "image/png")]).status_code == 422
+    lista = cliente.get("/api/v1/comentarios", headers=con, params=base).json()
+    assert len(lista) == antes + 1, lista    # el envío con una foto mala no dejó comentario
+    con_foto = next(c for c in lista if c["fotos"])
+    assert len(con_foto["fotos"]) == 2 and cliente.get(con_foto["fotos"][0]["url"]).content == PNG_PRUEBA
+    paso("el Observador adjunta hasta 4 fotos a un comentario; con una foto inválida no se guarda nada")
+
+    assert cliente.request("DELETE", f"/api/v1/comentarios/{c.json()['id']}", headers=tec,
+                           json={"motivo": "No aplica"}).status_code == 403
+    cliente.request("DELETE", f"/api/v1/comentarios/{c.json()['id']}", headers=adm,
+                    json={"motivo": "Prueba de moderación"}).raise_for_status()
+    visibles = cliente.get("/api/v1/comentarios", headers=obs, params=base).json()
+    # Se ocultó con su respuesta; solo queda el comentario con fotos
+    assert [x["id"] for x in visibles] == [con_foto["id"]], visibles
+    ocultos = cliente.get("/api/v1/comentarios", headers=adm, params={**base, "incluir_ocultos": True}).json()
+    assert any(x["motivo_eliminacion"] == "Prueba de moderación" for x in ocultos), ocultos
+    paso("solo el Administrador oculta un comentario (con su hilo) y conserva el texto con su motivo")
+
+    for ruta in ("/api/v1/edificios", "/api/v1/areas", "/api/v1/inventario", "/api/v1/servicios", "/api/v1/resumen/servicios"):
+        assert cliente.get(ruta, headers=obs).status_code == 200, ruta
+    for ruta in ("/api/v1/consumos", "/api/v1/resumen/consumos", "/api/v1/mantenimientos/ordenes",
+                 "/api/v1/mantenimientos/plantillas", "/api/v1/resumen/mantenimientos", f"/api/v1/historial/EDIFICIO/{ed['id']}"):
+        assert cliente.get(ruta, headers=obs).status_code == 403, ruta
+        assert cliente.get(ruta, headers=con).status_code == 200, ruta
+    r = cliente.get("/api/v1/comentarios", headers=obs, params={"recurso": "CONSUMO", "recurso_id": 1})
+    assert r.status_code == 403, r.text
+    paso("el Observador ve inmuebles y el estado de los servicios, pero no consumos, mantenimientos ni historial")
 
 
 def probar_usuarios_y_sesiones(adm, tec, con):

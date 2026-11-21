@@ -39,7 +39,7 @@ RECURSOS = {
     "CONSUMO": Consumo,
 }
 RecursoComentable = Literal["EDIFICIO", "AREA", "INVENTARIO", "SERVICIO", "CONSUMO"]
-QUIENES_ESCRIBEN = (OBSERVADOR,)
+QUIENES_ESCRIBEN = (OBSERVADOR, TECNICO, ADMINISTRADOR)
 # El Observador no ve consumos: tampoco los comenta ni lee sus comentarios
 SOLO_INTERNOS = {"CONSUMO"}
 MAXIMO_POR_MINUTO = 10
@@ -102,10 +102,13 @@ router = APIRouter(prefix="/comentarios", tags=["Comentarios"])
 async def listar(
     recurso: RecursoComentable,
     recurso_id: int = Query(gt=0),
+    incluir_ocultos: bool = Query(False, description="Solo Administrador"),
     usuario: UsuarioToken = Depends(requiere_rol(*TODOS)),
     db: AsyncSession = Depends(get_db),
 ):
     _revisar_alcance(recurso, usuario)
+    if incluir_ocultos and usuario.rol != ADMINISTRADOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el Administrador puede ver comentarios ocultos")
     # Solo columnas de usuarios que este servicio puede leer (nunca el hash de la contraseña)
     consulta = (
         select(Comentario, Usuario.nombre, Usuario.rol)
@@ -113,7 +116,8 @@ async def listar(
         .where(Comentario.recurso == recurso, Comentario.recurso_id == recurso_id)
         .order_by(Comentario.creado_en, Comentario.id)
     )
-    consulta = consulta.where(Comentario.eliminado_en.is_(None))
+    if not incluir_ocultos:
+        consulta = consulta.where(Comentario.eliminado_en.is_(None))
     filas = (await db.execute(consulta)).all()
     visibles = {c.id for c, _, _ in filas}
     # Fotos de todos los comentarios en una consulta, y sus URL en una sola llamada a archivos-service
@@ -197,6 +201,9 @@ async def comentar_con_fotos(
 async def _crear_comentario(db: AsyncSession, datos: "ComentarioCrear", usuario: UsuarioToken) -> Comentario:
     """Revisa las reglas, agrega el comentario y su evento. Quien llama hace commit."""
     _revisar_alcance(datos.recurso, usuario)
+    if datos.respuesta_a is None and usuario.rol != OBSERVADOR:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Los comentarios nuevos los escriben los Observadores; tú puedes responder a uno de ellos")
 
     # Lo comentado debe existir y estar activo
     objetivo = await db.get(RECURSOS[datos.recurso], datos.recurso_id)
@@ -224,6 +231,29 @@ async def _crear_comentario(db: AsyncSession, datos: "ComentarioCrear", usuario:
     await db.refresh(comentario)
     await registrar_evento(db, accion="CREAR", recurso="COMENTARIO", recurso_id=comentario.id,
                            usuario=usuario, despues=foto(comentario))
+    return comentario
+
+
+@router.delete("/{id}", response_model=ComentarioSalida, summary="Ocultar un comentario (solo Administrador)")
+async def ocultar(
+    id: int,
+    datos: Eliminacion,
+    usuario: UsuarioToken = Depends(requiere_rol(*SOLO_ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    comentario = await db.get(Comentario, id)
+    if comentario is None or comentario.eliminado_en is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No existe un comentario visible con id {id}")
+    antes = foto(comentario)
+    # Borrado lógico: el texto se conserva para la auditoría, pero deja de mostrarse
+    comentario.eliminado_en = datetime.now(timezone.utc)
+    comentario.eliminado_por = usuario.id
+    comentario.motivo_eliminacion = datos.motivo
+    await db.flush()
+    await db.refresh(comentario)
+    await registrar_evento(db, accion="ELIMINAR", recurso="COMENTARIO", recurso_id=comentario.id, usuario=usuario,
+                           antes=antes, despues=foto(comentario), motivo=datos.motivo)
+    await db.commit()
     return comentario
 
 
