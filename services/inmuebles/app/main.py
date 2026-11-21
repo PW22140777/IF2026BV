@@ -570,6 +570,19 @@ async def asegurar_campus_fijos() -> None:
             await db.rollback()
 
 
+def _consumidores():
+    from comun.mantenimientos import PATRONES, manejador_de_estados
+    from comun.mensajeria import consumidor
+
+    # Un mantenimiento iniciado o terminado deja el edificio, el área o el elemento en el estado que dice su plantilla
+    aplicar = manejador_de_estados("inmuebles.mantenimiento", {
+        "EDIFICIO": (Edificio, EdificioSalida, ("OPERATIVO", "EN_MANTENIMIENTO", "FUERA_DE_SERVICIO")),
+        "AREA": (Area, AreaSalida, ("OPERATIVO", "EN_MANTENIMIENTO", "FUERA_DE_SERVICIO")),
+        "INVENTARIO": (ElementoInventario, ElementoSalida, ("BUENO", "REGULAR", "MALO", "FUERA_DE_SERVICIO")),
+    })
+    return [consumidor("inmuebles.mantenimiento", PATRONES, aplicar)]
+
+
 # Archivos adjuntos (fotos, planos, PDF): la ficha aquí, el archivo en archivos-service
 router_archivos_edificios = crear_router_adjuntos(ruta="/edificios", recurso="EDIFICIO", modelo=Edificio,
                                                   carpeta="edificios", etiqueta="Edificios: archivos")
@@ -586,4 +599,5 @@ app = crear_app(
     routers=[router_campus, router_edificios, router_areas, router_inventario, router_tipos, router_resumen,
              router_archivos_edificios, router_archivos_areas, router_archivos_inventario],
     al_iniciar=asegurar_campus_fijos,
+    consumidores=_consumidores() if configuracion().rabbitmq_url else (),
 )

@@ -158,6 +158,7 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
         {orden.terminada_en && <div><dt>Terminó</dt><dd>{orden.terminada_por_nombre}, {fecha(orden.terminada_en)}</dd></div>}
         {orden.terminada_en && <div><dt>Duración</dt><dd>{duracion(orden.iniciada_en, orden.terminada_en)}</dd></div>}
         {orden.resultado && <div><dt>Resultado</dt><dd>{legible(orden.resultado, 'resultado')}</dd></div>}
+        {orden.estado_recurso_nuevo && <div><dt>El recurso queda</dt><dd>{legible(orden.estado_recurso_nuevo)}</dd></div>}
         {orden.motivo_cancelacion && <div><dt>Motivo de cancelación</dt><dd>{orden.motivo_cancelacion}</dd></div>}
       </dl>
 

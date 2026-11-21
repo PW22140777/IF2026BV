@@ -109,6 +109,7 @@ async def _cancelar(db: AsyncSession, orden: OrdenMantenimiento, usuario: Usuari
     antes = await foto(db, orden)
     orden.estado = "CANCELADA"
     orden.motivo_cancelacion = motivo
+    orden.estado_recurso_nuevo = None    # cancelar no cambia el estado del recurso
     orden.modificado_en = datetime.now(timezone.utc)
     orden.modificado_por = usuario.id
     await db.flush()
@@ -321,6 +322,7 @@ async def iniciar(id: int, usuario: UsuarioToken = Depends(requiere_rol(*EDITORE
     antes = await foto(db, orden)
     orden.estado = "EN_CURSO"
     orden.iniciada_en, orden.iniciada_por = datetime.now(timezone.utc), usuario.id
+    orden.estado_recurso_nuevo = plantilla.estado_al_iniciar     # None = el recurso no cambia al iniciar
     orden.modificado_en, orden.modificado_por = orden.iniciada_en, usuario.id
     await db.flush()
     await registrar_evento(db, accion="INICIAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
@@ -344,6 +346,9 @@ async def terminar(id: int, datos: Terminacion, usuario: UsuarioToken = Depends(
     orden.estado = "TERMINADA"
     orden.resultado, orden.respuestas, orden.notas = datos.resultado, respuestas, datos.notas
     orden.terminada_en, orden.terminada_por = datetime.now(timezone.utc), usuario.id
+    # En qué estado queda el recurso según el resultado (lo aplica el servicio dueño del recurso)
+    orden.estado_recurso_nuevo = {"RESUELTO": plantilla.estado_resuelto, "PARCIAL": plantilla.estado_parcial,
+                                  "NO_RESUELTO": plantilla.estado_no_resuelto}[datos.resultado]
     orden.modificado_en, orden.modificado_por = orden.terminada_en, usuario.id
     await db.flush()
     await registrar_evento(db, accion="TERMINAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
