@@ -122,7 +122,8 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
   const [motivo, setMotivo] = useState('')
   const [error, setError] = useState('')
   const [version, setVersion] = useState(0)        // fuerza recargar el historial
-  const puedeEditar = usuario.rol !== 'CONSULTA' && !registro.eliminado_en
+  // Solo el Administrador y el Técnico modifican; Consulta y Observador leen
+  const puedeEditar = ['ADMINISTRADOR', 'TECNICO'].includes(usuario.rol) && !registro.eliminado_en
   const esAdmin = usuario.rol === 'ADMINISTRADOR'
   const ruta = `${config.ruta}/${registro.id}`
 
@@ -265,7 +266,7 @@ export function PaginaRecurso({ config, usuario, campusActivo = '', idInicial = 
   const [creando, setCreando] = useState(false)
   const [filtros, setFiltros] = useState({})
   const [verEliminados, setVerEliminados] = useState(false)
-  const puedeCrear = usuario.rol !== 'CONSULTA'
+  const puedeCrear = ['ADMINISTRADOR', 'TECNICO'].includes(usuario.rol)
   const esAdmin = usuario.rol === 'ADMINISTRADOR'
 
   const cargar = useCallback(async () => {

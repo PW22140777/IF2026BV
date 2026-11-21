@@ -53,9 +53,12 @@ RUTAS: dict[str, str] = {
     "/api/v1/archivos/descarga": "archivos",
 }
 SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "archivos")
-RUTAS_PUBLICAS = {"/api/v1/auth/login"}
-# Sin token: la descarga de archivos lleva su propia firma que caduca
-RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/archivos/descarga"}
+# Sin token: el login y el inicio con la cuenta institucional (también cuentan en el límite de logins)
+RUTAS_PUBLICAS = {"/api/v1/auth/login", "/api/v1/auth/oauth/inicio", "/api/v1/auth/oauth/callback",
+                  "/api/v1/auth/oauth/canjear"}
+# Sin token pero con el límite normal de la API: solo dice con qué cuenta entran los Observadores
+RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/auth/oauth/proveedor",
+                                    "/api/v1/archivos/descarga"}   # lleva su propia firma que caduca
 
 # Cabeceras que no se deben reenviar (son de cada conexión)
 SALTO_A_SALTO = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",

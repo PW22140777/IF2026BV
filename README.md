@@ -15,6 +15,7 @@ Campus
 | Administrador | Todo, más ver la auditoría completa, verificar su integridad, restaurar registros eliminados y administrar usuarios |
 | Técnico | Crear, modificar y eliminar recursos y sus propiedades |
 | Consulta | Solo ver recursos, historial y el resumen para tomar decisiones |
+| Observador | Recorrer el campus (edificios, áreas, inventario y el estado de los servicios) y comentar; no ve consumos, mantenimientos ni historial. Se registra solo, con su cuenta institucional de Google |
 
 ## Arrancar el sistema
 
@@ -151,6 +152,66 @@ Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_c
 - El estado de un servicio (operando, con falla, suspendido, en mantenimiento) se actualiza como cualquier otro campo y queda en su historial; `/resumen/servicios` lista los que no están operando con normalidad.
 - No se puede eliminar un campus con edificios o áreas activos. Al eliminarlo, sus servicios generales quedan inactivos automáticamente (evento por RabbitMQ). Para restaurar un edificio o un área, su campus debe estar activo.
 - Todas las listas, el resumen y las rutas de la API aceptan `?campus_id=` para filtrar.
+
+## Observadores: registro con cuenta institucional y comentarios
+
+**Lo que ve un Observador: el «Recorrido».** Es su única pantalla (los demás roles la tienen como sección adicional):
+
+1. **Campus:** una calle con los edificios. Cada uno tiene la altura de sus niveles y cada ventana es un área, con el color de su estado; abajo, el estado de sus servicios. Las áreas sin edificio (canchas) son terrenos.
+2. **Edificio:** corte por pisos, de la planta baja hacia arriba; cada área es una puerta. Abajo, sus servicios y su tablero de avisos (comentarios).
+3. **Salón:** el inventario agrupado por tipo, con cuántas piezas hay en cada estado, los servicios del área y su tablero de avisos.
+
+En el servidor, consumos, órdenes y plantillas de mantenimiento, `/resumen/consumos`, `/resumen/mantenimientos` y el historial usan `LECTORES_INTERNOS` (Administrador, Técnico y Consulta): un Observador recibe 403 aunque escriba la URL. Un edificio o área sí puede mostrar el estado «En mantenimiento», porque es su propio estado.
+
+El rol **Observador** es para personas de la comunidad que quieren dar seguimiento a los inmuebles y reportar lo que ven. No lo crea el Administrador: cada quien se registra en **/registro** con su cuenta institucional de Google (`@queretaro.tecnm.mx`, el correo de la escuela está en Google Workspace) y no tiene contraseña.
+
+| Quién | En los comentarios puede |
+| --- | --- |
+| Observador | Leer, escribir comentarios en edificios, áreas, inventario y servicios, y responder dentro de un hilo (los consumos no los ve ni los comenta) |
+| Técnico, Administrador | Leer y responder (opcional); no abren comentarios nuevos |
+| Administrador | Además, ocultar un comentario con motivo (borrado lógico: el texto queda en el historial) |
+| Consulta | Solo leer |
+
+**Cómo entra un Observador** (OpenID Connect con código de autorización + PKCE, `services/auth/app/oauth.py`):
+
+1. `/registro` → «Continuar con Google» → `GET /api/v1/auth/oauth/inicio`, que guarda `state`, `nonce` y el verificador PKCE en una cookie firmada y redirige al proveedor (`OAUTH_PROVEEDOR`: `google` o `microsoft`). El botón sabe cuál es por `GET /api/v1/auth/oauth/proveedor` (pública).
+2. El proveedor regresa a `/api/v1/auth/oauth/callback`. auth-service cambia el código por un `id_token` y comprueba firma (llaves públicas del proveedor), emisor, audiencia, vigencia y `nonce`. Con **Google** exige además `hd` = dominio de la escuela (solo viene en cuentas del Google Workspace; un Gmail personal no lo trae), `email_verified` y que el correo sea de `DOMINIOS_INSTITUCIONALES`. Con **Microsoft** revisa el directorio (`tid`) y el dominio del correo.
+3. La primera vez crea la cuenta con rol `OBSERVADOR`; abre la sesión como cualquier otra y redirige a `/registro/listo#codigo=…`. El frontend cambia ese código de un solo uso (60 s) por el JWT con `POST /api/v1/auth/oauth/canjear`, así el token nunca viaja en una URL.
+
+Reglas: un correo que ya tiene cuenta con contraseña no puede entrar por Google ni Microsoft; si un Observador cambia de proveedor (p. ej. de Microsoft a Google) se liga por su correo, que el proveedor ya verificó; un Observador no puede entrar con contraseña; el Administrador no le cambia el rol ni le asigna contraseña, pero sí puede desactivarlo.
+
+**Configurar Google** (opción en uso; basta una cuenta de Gmail para crear el proyecto):
+
+1. En https://console.cloud.google.com crea un proyecto.
+2. «Google Auth Platform» (Pantalla de consentimiento de OAuth): tipo **Externo**, nombre de la app y tu correo. Permisos (scopes): solo `openid`, `email` y `profile`; son básicos y no requieren revisión de Google.
+3. «Clientes» (Credenciales) → Crear cliente → **Aplicación web**. URI de redirección autorizado: `http://localhost:8080/api/v1/auth/oauth/callback`.
+4. En `.env`: `OAUTH_PROVEEDOR=google`, `OAUTH_CLIENTE_ID` y `OAUTH_CLIENTE_SECRETO` del cliente. Reinicia `auth`.
+5. En «Público» (Audience), pulsa **Publicar app**. Mientras está «En prueba» solo entran los usuarios de prueba que agregues (hasta 100).
+6. Si alguien ve «Acceso bloqueado: tu administrador no aprobó esta app», el administrador del Google Workspace de la escuela restringe apps de terceros y tiene que permitirla.
+
+**Configurar Microsoft Entra ID** (alternativa: `OAUTH_PROVEEDOR=microsoft`):
+
+1. En https://entra.microsoft.com → Identidad → Aplicaciones → Registros de aplicaciones → Nuevo registro. Tipo de cuenta: «solo cuentas de este directorio organizativo». URI de redirección (Web): `http://localhost:8080/api/v1/auth/oauth/callback`.
+2. En «Certificados y secretos», crea un secreto de cliente y copia su **valor**.
+3. En `.env`: `OAUTH_INQUILINO` = Id. de directorio (inquilino), `OAUTH_CLIENTE_ID` = Id. de aplicación (cliente), `OAUTH_CLIENTE_SECRETO` = el valor del secreto. Reinicia `auth`.
+
+**Si no puedes registrar la app en el directorio de la institución** (al entrar a Entra solo ves tu «Directorio predeterminado», porque es una cuenta personal de Microsoft o la escuela no deja registrar apps):
+
+1. Regístrala en tu directorio con el tipo de cuenta «Cuentas en cualquier directorio organizativo (multiinquilino)».
+2. En `.env`: `OAUTH_ENTRADA=organizations` y `OAUTH_INQUILINO` = el directorio **de la institución**, que es el GUID del `issuer` en `https://login.microsoftonline.com/queretaro.tecnm.mx/.well-known/openid-configuration`.
+3. Así cualquier cuenta de trabajo o escuela puede iniciar sesión en Microsoft, pero `auth` solo acepta el `id_token` si su emisor y su `tid` son los de la institución y el correo es `@queretaro.tecnm.mx`.
+4. Límite: la primera vez Microsoft pide a cada persona aceptar los permisos (`openid`, `profile`, `email`). Si la escuela no deja que los usuarios acepten apps de editores no verificados, aparece «Se necesita la aprobación del administrador» y solo TI puede darla.
+
+**Si los alumnos no tienen cuenta de Microsoft de la escuela** (Microsoft responde «Este nombre de usuario puede ser incorrecto»), se aceptan **cuentas personales de Microsoft creadas con el correo institucional**:
+
+1. En Entra, en el Manifiesto de la app, pon `requestedAccessTokenVersion` (dentro de `api`) en `2` y `signInAudience` en `AzureADandPersonalMicrosoftAccount`.
+2. En `.env`: `OAUTH_ENTRADA=common` y `OAUTH_CUENTAS_PERSONALES=true` (`OAUTH_INQUILINO` sigue siendo el directorio de la institución).
+3. `auth` acepta tokens de dos directorios: el de la institución y el de cuentas personales (`9188040d-6c67-4c5b-b112-36a304b66dad`). El emisor debe coincidir con el `tid` del token y el correo debe ser `@queretaro.tecnm.mx`.
+4. Quien no tenga cuenta personal la crea en signup.live.com con «Usar un correo existente»: Microsoft le manda un código a su correo de la escuela, así que solo su dueño puede crearla. Las cuentas personales sí pueden aceptar los permisos de una app de editor no verificado (Microsoft la muestra como «no comprobada»).
+
+**Pruebas sin Google ni Microsoft:** con `OAUTH_MODO_PRUEBA=true` (solo base local) `GET /api/v1/auth/oauth/inicio?correo_prueba=ana@queretaro.tecnm.mx` entra sin pasar por el proveedor, con las mismas reglas de dominio del proveedor configurado; lo usa `tests/prueba_sistema.py`. `tests/test_oauth.py` prueba la validación del `id_token` con una llave RSA de prueba. **Nunca lo actives en una base con datos reales.**
+
+**Base que ya existe:** aplica `db/migraciones/007_observadores_y_comentarios.sql` como dueño de la base, con `-v pass_comentarios=…` (la contraseña de `DB_PASS_COMENTARIOS`).
 
 ## Archivos adjuntos (fotos, planos, PDF y evidencias)
 

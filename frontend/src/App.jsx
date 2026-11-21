@@ -6,19 +6,23 @@ import { BarraSuperior } from './componentes/BarraSuperior'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
 import { Perfil } from './componentes/Perfil'
+import { AyudaCuenta, BotonCuentaInstitucional, Registro, useIntentoFallido, useProveedorOAuth } from './componentes/Registro'
 import { Resumen } from './componentes/Resumen'
 import { Usuarios } from './componentes/Usuarios'
 import { RECURSOS } from './recursos'
 
+const LECTORES = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA', 'OBSERVADOR']
+// El Observador solo recorre el campus: sin tablas, consumos ni mantenimientos
+const INTERNOS = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA']
 
-// Menú: qué ve cada rol
+// Menú: qué ve cada rol (la primera sección visible es la de inicio)
 const SECCIONES = [
-  { id: 'resumen', titulo: 'Resumen', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'] },
-  { id: 'edificios', titulo: 'Edificios', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'areas', titulo: 'Áreas', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'inventario', titulo: 'Inventario', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Inmuebles' },
-  { id: 'servicios', titulo: 'Agua y luz', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Servicios básicos' },
-  { id: 'consumos', titulo: 'Consumos', roles: ['ADMINISTRADOR', 'TECNICO', 'CONSULTA'], grupo: 'Servicios básicos' },
+  { id: 'resumen', titulo: 'Resumen', roles: INTERNOS },
+  { id: 'edificios', titulo: 'Edificios', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'areas', titulo: 'Áreas', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'inventario', titulo: 'Inventario', roles: INTERNOS, grupo: 'Inmuebles' },
+  { id: 'servicios', titulo: 'Agua y luz', roles: INTERNOS, grupo: 'Servicios básicos' },
+  { id: 'consumos', titulo: 'Consumos', roles: INTERNOS, grupo: 'Servicios básicos' },
   { id: 'tipos_elemento', titulo: 'Tipos de elemento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'auditoria', titulo: 'Auditoría', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'usuarios', titulo: 'Usuarios', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
@@ -52,6 +56,8 @@ function Login({ alEntrar, mensaje }) {
   const [contrasena, setContrasena] = useState('')
   const [error, setError] = useState(mensaje || '')
   const [enviando, setEnviando] = useState(false)
+  const intentoFallido = useIntentoFallido()   // volvió de Google o Microsoft sin entrar
+  const proveedor = useProveedorOAuth()
 
   async function entrar(e) {
     e.preventDefault()
@@ -89,6 +95,12 @@ function Login({ alEntrar, mensaje }) {
         <button type="submit" className="boton-principal boton-ancho" disabled={enviando}>
           {enviando ? 'Entrando…' : 'Iniciar sesión'}
         </button>
+        <div className="separador-login"><span>¿Eres Observador?</span></div>
+        {intentoFallido && <AyudaCuenta proveedor={proveedor} />}
+        <BotonCuentaInstitucional />
+        <p className="nota-registro">
+          Si es tu primera vez, <a href="/registro">conoce cómo registrarte</a>.
+        </p>
       </form>
     </main>
   )
@@ -115,6 +127,8 @@ export default function App() {
   useEffect(() => {
     if (grupoActual && !gruposAbiertos.includes(grupoActual)) cambiarGrupos([...gruposAbiertos, grupoActual])
   }, [grupoActual])   // eslint-disable-line react-hooks/exhaustive-deps
+  // /registro y /registro/listo: página de los Observadores (entran con su cuenta institucional)
+  const [enRegistro, setEnRegistro] = useState(() => window.location.pathname.startsWith('/registro'))
   const usarIdInicial = useCallback(() => setIdInicial(null), [])
 
   // Desde el Resumen: ir a una sección con un registro ya abierto
@@ -137,6 +151,10 @@ export default function App() {
     alActualizarSesion(setSesion)
   }, [])
 
+  if (!sesion && enRegistro) {
+    return <Registro alEntrar={(s) => { setEnRegistro(false); setSeccion('resumen'); setSesion(s) }}
+                     alIrAlInicio={() => { window.history.replaceState(null, '', '/'); setEnRegistro(false) }} />
+  }
   if (!sesion) {
     return <Login mensaje={mensajeLogin} alEntrar={(s) => { setMensajeLogin(''); setSeccion('resumen'); setSesion(s) }} />
   }
@@ -147,15 +165,17 @@ export default function App() {
     return <CambiarContrasena obligatorio alSalir={() => setSesion(null)} />
   }
   const visibles = SECCIONES.filter((s) => s.roles.includes(usuario.rol))
+  // Si la sección elegida no es de este rol (p. ej. «Resumen» para un Observador), se abre la primera que sí
+  const actual = ['perfil', 'contrasena'].includes(seccion) || visibles.some((s) => s.id === seccion) ? seccion : (visibles[0]?.id || 'perfil')
   const grupos = [...new Set(visibles.map((s) => s.grupo || ''))]
 
   function pagina() {
-    if (seccion === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
-    if (seccion === 'auditoria') return <Auditoria />
-    if (seccion === 'usuarios') return <Usuarios usuario={usuario} />
-    if (seccion === 'contrasena') return <CambiarContrasena />
-    if (seccion === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
-    return <PaginaRecurso config={RECURSOS[seccion]} usuario={usuario} campusActivo={campusActivo}
+    if (actual === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
+    if (actual === 'auditoria') return <Auditoria />
+    if (actual === 'usuarios') return <Usuarios usuario={usuario} />
+    if (actual === 'contrasena') return <CambiarContrasena />
+    if (actual === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
+    return <PaginaRecurso config={RECURSOS[actual]} usuario={usuario} campusActivo={campusActivo}
                           idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
   }
 
@@ -192,7 +212,7 @@ export default function App() {
               <ul id={idLista} hidden={!abierto}>
                 {opciones.map((s) => (
                   <li key={s.id}>
-                    <button type="button" aria-current={seccion === s.id ? 'page' : undefined}
+                    <button type="button" aria-current={actual === s.id ? 'page' : undefined}
                             onClick={() => { setIdInicial(null); setSeccion(s.id); setMenuAbierto(false) }}>
                       {s.titulo}
                     </button>

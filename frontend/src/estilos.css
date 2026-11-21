@@ -325,6 +325,19 @@ textarea { resize: vertical; }
 .cambios del { color: var(--peligro); }
 .cambios ins { text-decoration: none; background: #fdf3cf; padding: 0 0.2rem; font-weight: 600; }
 
+/* ------------------------------------------- registro de Observadores (OAuth) */
+.boton-enlace { display: block; text-align: center; text-decoration: none; }
+.separador-login { display: flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0 0.75rem; color: var(--grafito); font-size: 0.85rem; }
+.separador-login::before, .separador-login::after { content: ''; flex: 1; border-top: 1px solid var(--linea); }
+.nota-registro { margin: 0.75rem 0 0; font-size: 0.88rem; color: var(--grafito); text-align: center; }
+.lista-registro { margin: 0 0 1.25rem; padding-left: 1.1rem; }
+.lista-registro li { margin: 0.3rem 0; }
+/* Aviso para quien volvió de Microsoft sin entrar: cómo crear su cuenta */
+.aviso-ayuda { background: #fdf6dc; border-color: var(--senal-oscura); margin-bottom: 1rem; font-size: 0.9rem; }
+.aviso-ayuda p { margin: 0.35rem 0; }
+.aviso-ayuda ol { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; }
+.aviso-ayuda li { margin: 0.2rem 0; }
+
 /* --------------------------------------------- tipos de elemento y sus propiedades */
 .campos-del-tipo { margin: 0.75rem 0 0; padding: 0.75rem 0.9rem 0.1rem; border: 1px solid var(--linea); border-left: 4px solid var(--senal); border-radius: 0; background: #fbfcfa; }
 .campos-del-tipo legend { font-weight: 700; font-size: 0.9rem; padding: 0 0.3rem; }

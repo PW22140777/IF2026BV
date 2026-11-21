@@ -10,7 +10,7 @@ const VERBOS = {
   RESTAURAR: 'restauró el registro',
 }
 
-const ROLES = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico', CONSULTA: 'Consulta', SISTEMA: 'Automático' }
+const ROLES = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico', CONSULTA: 'Consulta', OBSERVADOR: 'Observador', SISTEMA: 'Automático' }
 
 export function formatoFecha(iso) {
   return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })

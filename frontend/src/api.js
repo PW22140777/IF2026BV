@@ -62,6 +62,24 @@ export async function iniciarSesion(email, contrasena) {
   return guardarSesion(datos)
 }
 
+// Con qué cuenta entran los Observadores (Google o Microsoft); no necesita sesión
+export async function proveedorOAuth() {
+  const r = await fetch(`${BASE}/auth/oauth/proveedor`)
+  if (!r.ok) throw new Error('No se pudo consultar el inicio de sesión institucional')
+  return r.json()
+}
+
+// Observadores: tras entrar con Google o Microsoft, el servidor entrega un código de un solo uso
+// (en la URL #codigo=...) que aquí se cambia por la sesión de siempre
+export async function canjearCodigoOAuth(codigo) {
+  const r = await fetch(`${BASE}/auth/oauth/canjear`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo }),
+  })
+  const datos = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(mensajeDeError(datos, r.status))
+  return guardarSesion(datos)
+}
+
 // Devuelve la sesión con debe_cambiar_contrasena en false; avisa a la aplicación para que se abra
 export async function cambiarContrasena(actual, nueva) {
   const datos = await api('/auth/cambiar-contrasena', { metodo: 'POST', cuerpo: { actual, nueva } })

@@ -1,12 +1,17 @@
 """auth-service: inicio de sesión, sesiones, emisión de JWT y administración de usuarios."""
+import asyncio
 import os
+import secrets
 import unicodedata
 import uuid
+from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_core import PydanticCustomError
@@ -19,9 +24,10 @@ from comun.app import crear_app
 from comun.config import configuracion
 from comun.db import fabrica_sesiones, get_db
 from comun.historial import registrar_evento
-from comun.modelos import Sesion, Usuario
+from comun.modelos import OauthCanje, Sesion, Usuario
+from . import oauth
 from comun.seguridad import (
-    ADMINISTRADOR, CONSULTA, SISTEMA, SOLO_ADMIN, TECNICO, TODOS, UsuarioToken, crear_token, requiere_rol,
+    ADMINISTRADOR, CONSULTA, OBSERVADOR, SISTEMA, SOLO_ADMIN, TECNICO, TODOS, UsuarioToken, crear_token, requiere_rol,
 )
 
 log = structlog.get_logger()
@@ -93,6 +99,7 @@ class UsuarioSalida(BaseModel):
     creado_por: int | None
     modificado_en: datetime | None
     modificado_por: int | None
+    proveedor_oauth: str | None = None   # "microsoft" = entra con su cuenta institucional, sin contraseña
 
 
 class UsuarioCrear(BaseModel):
@@ -189,7 +196,8 @@ router_usuarios = APIRouter(prefix="/usuarios", tags=["Usuarios"])
 async def login(formulario: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     email = formulario.username.strip().lower()
     usuario = (await db.execute(select(Usuario).where(Usuario.email == email))).scalar_one_or_none()
-    valido = coincide(formulario.password, usuario.hash_contrasena if usuario else _HASH_FICTICIO)
+    hash_guardado = usuario.hash_contrasena if usuario and usuario.hash_contrasena else _HASH_FICTICIO
+    valido = coincide(formulario.password, hash_guardado) and bool(usuario and usuario.hash_contrasena)
 
     if not usuario or not valido or not usuario.activo:
         motivo = "Usuario desactivado" if (usuario and valido) else "Credenciales inválidas"
@@ -241,6 +249,9 @@ async def cambiar_contrasena(datos: CambioContrasena,
                              actual: UsuarioToken = Depends(requiere_rol(*TODOS, aunque_deba_cambiar_contrasena=True)),
                              db: AsyncSession = Depends(get_db)):
     usuario = await db.get(Usuario, actual.id)
+    if usuario.hash_contrasena is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Tu cuenta entra con tu cuenta institucional de Microsoft y no tiene contraseña")
     if not coincide(datos.actual, usuario.hash_contrasena):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La contraseña actual no es correcta; revísala e intenta de nuevo")
     if coincide(datos.nueva, usuario.hash_contrasena):
@@ -361,6 +372,10 @@ async def modificar_usuario(id: int, datos: UsuarioActualizar,
                                  "aquí se asigna una temporal a otras cuentas")
     if not cambios:
         return usuario
+    # El rol Observador se obtiene solo registrándose con la cuenta institucional, y no tiene contraseña
+    if usuario.rol == OBSERVADOR and ("rol" in cambios or cambios.get("contrasena")):
+        raise HTTPException(409, "Un Observador entra con su cuenta institucional: no se le asigna contraseña "
+                                 "ni se le cambia el rol; puedes desactivarlo")
     if cambios.get("contrasena"):
         exigir_contrasena_segura(cambios["contrasena"], cambios.get("nombre", usuario.nombre), usuario.email)
 
@@ -386,6 +401,146 @@ async def modificar_usuario(id: int, datos: UsuarioActualizar,
                            motivo="Contraseña restablecida por el Administrador" if contrasena else None)
     await db.commit()
     return usuario
+
+
+# ------------------------------------------- Observadores: cuenta institucional
+class Canje(BaseModel):
+    codigo: str = Field(min_length=20, max_length=100)
+
+
+def _a_registro(mensaje: str) -> RedirectResponse:
+    """Vuelve a la página de registro con el problema explicado (sin datos personales)."""
+    respuesta = RedirectResponse(f"/registro?{urlencode({'error': mensaje})}", status_code=302)
+    respuesta.delete_cookie(oauth.NOMBRE_COOKIE, path="/api/v1/auth/oauth")
+    return respuesta
+
+
+@router_auth.get("/oauth/inicio", summary="Entrar o registrarse como Observador con la cuenta institucional")
+async def oauth_inicio(correo_prueba: str | None = None, nombre_prueba: str | None = None,
+                       db: AsyncSession = Depends(get_db)):
+    cfg = oauth.configuracion_oauth()
+    if cfg.modo_prueba and correo_prueba:
+        # Solo pruebas locales: no pasa por Google/Microsoft pero aplica las mismas reglas de dominio
+        try:
+            identidad = oauth.identidad_de_prueba(cfg, correo_prueba, nombre_prueba or correo_prueba)
+            return await _entrar_con_identidad(db, identidad)
+        except oauth.ErrorOAuth as e:
+            return _a_registro(str(e))
+    if not cfg.lista:
+        return _a_registro("El registro con cuenta institucional todavía no está configurado; avisa al Administrador")
+    estado, nonce = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
+    verificador, reto = oauth.par_pkce()
+    respuesta = RedirectResponse(oauth.url_autorizacion(cfg, estado, nonce, reto), status_code=302)
+    # La cookie vuelve solo a /callback; Lax permite que llegue en la redirección desde el proveedor
+    respuesta.set_cookie(oauth.NOMBRE_COOKIE, oauth.firmar_estado(configuracion().jwt_secret, estado, nonce, verificador),
+                         max_age=oauth.MINUTOS_ESTADO * 60, httponly=True, samesite="lax",
+                         secure=cfg.redireccion.startswith("https://"), path="/api/v1/auth/oauth")
+    return respuesta
+
+
+@router_auth.get("/oauth/proveedor", summary="Con qué cuenta entran los Observadores (pública, para el botón)")
+async def oauth_proveedor():
+    cfg = oauth.configuracion_oauth()
+    return {"proveedor": cfg.proveedor, "nombre": cfg.nombre, "configurado": cfg.lista or cfg.modo_prueba,
+            "dominios": list(cfg.dominios)}
+
+
+@router_auth.get("/oauth/callback", summary="Google o Microsoft regresan aquí después de que la persona entra")
+async def oauth_callback(request: Request, code: str | None = None, state: str | None = None,
+                         error: str | None = None, db: AsyncSession = Depends(get_db)):
+    cfg = oauth.configuracion_oauth()
+    if error:
+        return _a_registro(f"No se completó el inicio de sesión con {cfg.nombre}; elige tu cuenta de la escuela "
+                           "y vuelve a intentarlo")
+    try:
+        datos = oauth.leer_estado(configuracion().jwt_secret, request.cookies.get(oauth.NOMBRE_COOKIE), state)
+        if not code:
+            raise oauth.ErrorOAuth(f"{cfg.nombre} no devolvió el código de acceso; inténtalo de nuevo")
+        # El código solo sirve junto con el secreto de la aplicación y el verificador PKCE
+        async with httpx.AsyncClient(timeout=10) as cliente:
+            r = await cliente.post(cfg.url_token, data={
+                "client_id": cfg.cliente_id, "client_secret": cfg.cliente_secreto,
+                "grant_type": "authorization_code", "code": code,
+                "redirect_uri": cfg.redireccion, "code_verifier": datos["pkce"],
+            })
+        if r.status_code != 200 or "id_token" not in r.json():
+            log.warning("oauth_token_rechazado", estado=r.status_code)
+            raise oauth.ErrorOAuth(f"{cfg.nombre} no aceptó el inicio de sesión; inténtalo de nuevo")
+        # La descarga de llaves de PyJWT es bloqueante: se hace en otro hilo
+        identidad = await asyncio.to_thread(oauth.validar_id_token, cfg, r.json()["id_token"], datos["nonce"])
+        return await _entrar_con_identidad(db, identidad)
+    except oauth.ErrorOAuth as e:
+        await registrar_evento(db, accion="LOGIN_FALLIDO", recurso="SESION", recurso_id=None, usuario=None,
+                               despues={"proveedor": cfg.proveedor}, motivo=str(e))
+        await db.commit()
+        return _a_registro(str(e))
+    except httpx.HTTPError:
+        return _a_registro(f"No se pudo contactar a {cfg.nombre}; inténtalo en unos minutos")
+
+
+async def _entrar_con_identidad(db: AsyncSession, identidad: oauth.Identidad) -> RedirectResponse:
+    """Busca o registra al Observador, abre su sesión y entrega un código de un solo uso."""
+    usuario = (await db.execute(select(Usuario).where(
+        Usuario.proveedor_oauth == identidad.proveedor, Usuario.sujeto_oauth == identidad.sujeto))).scalar_one_or_none()
+    if usuario is None:
+        usuario = (await db.execute(select(Usuario).where(Usuario.email == identidad.email))).scalar_one_or_none()
+        if usuario is not None and usuario.rol != OBSERVADOR:
+            # Una cuenta con contraseña (Administrador, Técnico, Consulta) no se toma con Google/Microsoft
+            raise oauth.ErrorOAuth("Ese correo ya tiene una cuenta con contraseña; entra desde la pantalla de inicio")
+    if usuario is None:
+        usuario = Usuario(nombre=identidad.nombre, email=identidad.email, hash_contrasena=None, rol=OBSERVADOR,
+                          activo=True, proveedor_oauth=identidad.proveedor, sujeto_oauth=identidad.sujeto,
+                          creado_en=datetime.now(timezone.utc))
+        db.add(usuario)
+        try:
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            raise oauth.ErrorOAuth("Ese correo ya está registrado; vuelve a intentar entrar")
+        await db.refresh(usuario)
+        await registrar_evento(db, accion="CREAR", recurso="USUARIO", recurso_id=usuario.id, usuario=SISTEMA,
+                               despues=foto(usuario), motivo="Registro de Observador con cuenta institucional")
+    elif (usuario.proveedor_oauth, usuario.sujeto_oauth) != (identidad.proveedor, identidad.sujeto):
+        # Observador que aún no tenía ligada su cuenta, o que antes entraba con otro proveedor
+        # (p. ej. Microsoft y ahora Google): el proveedor ya confirmó que es dueño del correo
+        antes = foto(usuario)
+        usuario.proveedor_oauth, usuario.sujeto_oauth = identidad.proveedor, identidad.sujeto
+        await db.flush()
+        await registrar_evento(db, accion="MODIFICAR", recurso="USUARIO", recurso_id=usuario.id, usuario=SISTEMA,
+                               antes=antes, despues=foto(usuario), motivo="Cuenta institucional ligada")
+    if not usuario.activo:
+        raise oauth.ErrorOAuth("Tu cuenta está desactivada; habla con el Administrador")
+
+    vence_en = datetime.now(timezone.utc) + timedelta(hours=configuracion().sesion_maxima_horas)
+    sesion = Sesion(id=uuid.uuid4(), usuario_id=usuario.id, creada_en=datetime.now(timezone.utc),
+                    expira_en=_expiracion_por_inactividad(vence_en), vence_en=vence_en,
+                    ip=contexto.ip_cliente.get())
+    db.add(sesion)
+    await db.flush()
+    codigo, hash_codigo = oauth.nuevo_codigo_canje()
+    db.add(OauthCanje(hash_codigo=hash_codigo, sesion_id=sesion.id, creado_en=datetime.now(timezone.utc),
+                      expira_en=datetime.now(timezone.utc) + timedelta(seconds=oauth.SEGUNDOS_CANJE)))
+    quien = UsuarioToken(id=usuario.id, nombre=usuario.nombre, rol=usuario.rol, sesion_id=sesion.id)
+    await registrar_evento(db, accion="LOGIN", recurso="SESION", recurso_id=usuario.id, usuario=quien,
+                           despues={"email": usuario.email, "sesion_id": str(sesion.id), "proveedor": identidad.proveedor})
+    await db.commit()
+    # El código va en el fragmento (#): el navegador no lo envía a ningún servidor ni lo guarda en registros
+    respuesta = RedirectResponse(f"/registro/listo#codigo={codigo}", status_code=302)
+    respuesta.delete_cookie(oauth.NOMBRE_COOKIE, path="/api/v1/auth/oauth")
+    return respuesta
+
+
+@router_auth.post("/oauth/canjear", response_model=RespuestaLogin,
+                  summary="Cambiar el código de un solo uso por el token de la sesión")
+async def oauth_canjear(datos: Canje, db: AsyncSession = Depends(get_db)):
+    canje = await db.get(OauthCanje, oauth.hash_codigo(datos.codigo), with_for_update=True)
+    if canje is None or canje.usado_en is not None or canje.expira_en < datetime.now(timezone.utc):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El código ya se usó o expiró; vuelve a entrar con tu cuenta institucional")
+    canje.usado_en = datetime.now(timezone.utc)
+    sesion = await db.get(Sesion, canje.sesion_id)
+    usuario = await db.get(Usuario, sesion.usuario_id)
+    await db.commit()
+    return _respuesta_sesion(usuario, sesion)
 
 
 # ------------------------------------------------------------------- arranque
@@ -429,3 +584,7 @@ app = crear_app(
     routers=[router_auth, router_usuarios],
     al_iniciar=crear_usuarios_iniciales,
 )
+
+if oauth.configuracion_oauth().modo_prueba:
+    log.warning("oauth_modo_prueba", aviso="OAUTH_MODO_PRUEBA=true: se puede entrar como Observador sin Microsoft. "
+                                          "Úsalo solo en pruebas locales")

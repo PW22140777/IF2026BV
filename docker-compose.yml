@@ -59,6 +59,16 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@escuela.mx}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345}
       CREAR_USUARIOS_DEMO: ${CREAR_USUARIOS_DEMO:-true}
+      # Observadores: entran con su cuenta institucional de Microsoft Entra ID
+      OAUTH_PROVEEDOR: ${OAUTH_PROVEEDOR:-google}
+      OAUTH_INQUILINO: ${OAUTH_INQUILINO:-}
+      OAUTH_ENTRADA: ${OAUTH_ENTRADA:-}
+      OAUTH_CUENTAS_PERSONALES: ${OAUTH_CUENTAS_PERSONALES:-false}
+      OAUTH_CLIENTE_ID: ${OAUTH_CLIENTE_ID:-}
+      OAUTH_CLIENTE_SECRETO: ${OAUTH_CLIENTE_SECRETO:-}
+      OAUTH_REDIRECCION: ${OAUTH_REDIRECCION:-http://localhost:8080/api/v1/auth/oauth/callback}
+      DOMINIOS_INSTITUCIONALES: ${DOMINIOS_INSTITUCIONALES:-queretaro.tecnm.mx}
+      OAUTH_MODO_PRUEBA: ${OAUTH_MODO_PRUEBA:-false}
 
   inmuebles:
     <<: *backend

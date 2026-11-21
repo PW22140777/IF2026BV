@@ -19,7 +19,7 @@ from comun.app import crear_app
 from comun.config import configuracion
 from comun.db import fabrica_sesiones, get_db
 from comun.modelos import RegistroAuditoria
-from comun.seguridad import SOLO_ADMIN, TODOS, UsuarioToken, requiere_rol
+from comun.seguridad import LECTORES_INTERNOS, SOLO_ADMIN, UsuarioToken, requiere_rol
 
 from .cadena import (
     CAMPOS, HASH_INICIAL, calcular_hash, diferencias, firma_valida, firmar, normalizar_fecha,
@@ -118,11 +118,11 @@ router_historial = APIRouter(prefix="/historial", tags=["Historial"])
 router_auditoria = APIRouter(prefix="/auditoria", tags=["Auditoría (Administrador)"])
 
 
-@router_historial.get("/{recurso}/{recurso_id}", summary="Línea de tiempo de un recurso (todos los roles)")
+@router_historial.get("/{recurso}/{recurso_id}", summary="Línea de tiempo de un recurso (todos menos el Observador)")
 async def historial_recurso(
     recurso: str,
     recurso_id: int,
-    _: UsuarioToken = Depends(requiere_rol(*TODOS)),
+    _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)),
     db: AsyncSession = Depends(get_db),
 ):
     recurso = recurso.upper()
