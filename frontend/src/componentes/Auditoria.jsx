@@ -4,8 +4,8 @@ import { api } from '../api'
 import { legible } from '../recursos'
 import { formatoFecha, ListaCambios } from './Historial'
 
-const RECURSOS = ['', 'EDIFICIO', 'AREA', 'INVENTARIO', 'TIPO_ELEMENTO', 'SERVICIO', 'COMENTARIO', 'CONSUMO', 'USUARIO', 'SESION', 'AUDITORIA']
-const ACCIONES = ['', 'CREAR', 'MODIFICAR', 'ELIMINAR', 'RESTAURAR', 'LOGIN', 'LOGIN_FALLIDO', 'VERIFICAR']
+const RECURSOS = ['', 'EDIFICIO', 'AREA', 'INVENTARIO', 'TIPO_ELEMENTO', 'SERVICIO', 'COMENTARIO', 'PLANTILLA_MANTENIMIENTO', 'ORDEN_MANTENIMIENTO', 'CONSUMO', 'USUARIO', 'SESION', 'AUDITORIA']
+const ACCIONES = ['', 'CREAR', 'MODIFICAR', 'ELIMINAR', 'RESTAURAR', 'INICIAR', 'TERMINAR', 'CANCELAR', 'LOGIN', 'LOGIN_FALLIDO', 'VERIFICAR']
 const POR_PAGINA = 25
 
 export function Auditoria() {

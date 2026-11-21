@@ -6,6 +6,7 @@ import { api } from '../api'
 import { legible } from '../recursos'
 import { CamposDelTipo, propiedadAApi } from './Formulario'
 import { Adjuntos } from './Adjuntos'
+import { Historial } from './Historial'
 
 const FILTROS = [
   ['abiertas', 'Abiertas', { estado: 'PROGRAMADA,EN_CURSO' }],
@@ -211,6 +212,10 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
                 puedeEditar={atiende && orden.estado !== 'CANCELADA'} categoriaInicial="EVIDENCIA"
                 categorias={['EVIDENCIA', 'FOTO', 'DOCUMENTO', 'OTRO']} vacio="Sin evidencias todavía." />
 
+      <section className="seccion-detalle">
+        <h4>Historial</h4>
+        <Historial recurso="orden_mantenimiento" id={orden.id} version={version} />
+      </section>
     </aside>
   )
 }
