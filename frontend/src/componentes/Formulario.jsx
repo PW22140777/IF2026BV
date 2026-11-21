@@ -53,7 +53,7 @@ function propiedadesAControl(propiedades = {}) {
 }
 
 // Texto de un control -> valor JSON según la clase de dato de la propiedad
-function propiedadAApi(definicion, texto) {
+export function propiedadAApi(definicion, texto) {
   if (definicion.tipo === 'numero') return Number(texto)
   if (definicion.tipo === 'si_no') return texto === 'true'
   return texto.trim()
@@ -317,12 +317,13 @@ export function Formulario({ config, registro, alGuardar, alCancelar, campusActi
   )
 }
 
-// Controles de las propiedades que define el tipo de elemento elegido
-function CamposDelTipo({ tipo, definiciones, valores, alCambiar }) {
+// Controles de una lista de propiedades definidas: las de un tipo de elemento o
+// la lista de verificación de un mantenimiento (mismo formato)
+export function CamposDelTipo({ tipo, definiciones, valores, alCambiar, titulo }) {
   const hoy = new Date().toLocaleDateString('en-CA')
   return (
     <fieldset className="campos-del-tipo">
-      <legend>Propiedades de {tipo.nombre.toLowerCase()}</legend>
+      <legend>{titulo || `Propiedades de ${tipo.nombre.toLowerCase()}`}</legend>
       {definiciones.length === 0 && <p className="tenue">Este tipo no define propiedades.</p>}
       {definiciones.map((d) => {
         const id = `propiedad-${d.clave}`

@@ -35,7 +35,7 @@ from comun.seguridad import (
 
 from .esquemas import (
     Asignacion, Cancelacion, OrdenCrear, OrdenDetalle, OrdenSalida, Persona, PlantillaActualizar, PlantillaCrear,
-    PlantillaSalida,
+    PlantillaSalida, Terminacion,
 )
 
 log = structlog.get_logger()
@@ -329,6 +329,30 @@ async def iniciar(id: int, usuario: UsuarioToken = Depends(requiere_rol(*EDITORE
     return (await _detalles(db, [orden]))[0]
 
 
+@router_ordenes.post("/{id}/terminar", response_model=OrdenDetalle, summary="Terminar el mantenimiento con su resultado")
+async def terminar(id: int, datos: Terminacion, usuario: UsuarioToken = Depends(requiere_rol(*EDITORES)),
+                   db: AsyncSession = Depends(get_db)):
+    orden = await _orden_abierta(db, id)
+    if orden.estado != "EN_CURSO":
+        raise HTTPException(409, "Solo se termina una orden en curso; pulsa «Iniciar» primero")
+    await _exige_asignado(db, orden, usuario)
+    plantilla = await db.get(PlantillaMantenimiento, orden.plantilla_id)
+    respuestas, errores = revisar_valores(plantilla.lista_verificacion, datos.respuestas, plantilla.nombre.lower())
+    if errores:
+        raise HTTPException(422, "Revisa la lista de verificación: " + "; ".join(errores))
+    antes = await foto(db, orden)
+    orden.estado = "TERMINADA"
+    orden.resultado, orden.respuestas, orden.notas = datos.resultado, respuestas, datos.notas
+    orden.terminada_en, orden.terminada_por = datetime.now(timezone.utc), usuario.id
+    orden.modificado_en, orden.modificado_por = orden.terminada_en, usuario.id
+    await db.flush()
+    await registrar_evento(db, accion="TERMINAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
+                           antes=antes, despues=await foto(db, orden),
+                           motivo=f"Resultado: {datos.resultado.lower().replace('_', ' ')}")
+    await db.commit()
+    return (await _detalles(db, [orden]))[0]
+
+
 @router_ordenes.post("/{id}/cancelar", response_model=OrdenDetalle, summary="Cancelar una orden (Administrador)")
 async def cancelar(id: int, datos: Cancelacion, usuario: UsuarioToken = Depends(requiere_rol(*SOLO_ADMIN)),
                    db: AsyncSession = Depends(get_db)):
@@ -340,9 +364,23 @@ async def cancelar(id: int, datos: Cancelacion, usuario: UsuarioToken = Depends(
     return (await _detalles(db, [orden]))[0]
 
 
+# Evidencias (fotos, PDF) de una orden: archivos adjuntos que guarda archivos-service
+async def _puede_adjuntar_evidencia(db: AsyncSession, orden: OrdenMantenimiento, usuario: UsuarioToken) -> None:
+    if orden.estado == "CANCELADA":
+        raise HTTPException(409, "La orden está cancelada; ya no se le adjuntan evidencias")
+    await _exige_asignado(db, orden, usuario)   # las suben los técnicos asignados o el Administrador
+
+
+router_evidencias = crear_router_adjuntos(
+    ruta="/mantenimientos/ordenes", recurso="ORDEN_MANTENIMIENTO", modelo=OrdenMantenimiento,
+    carpeta="mantenimientos", sufijo="evidencias", etiqueta="Órdenes de mantenimiento: evidencias",
+    roles_lectura=LECTORES_INTERNOS, categoria_inicial="EVIDENCIA", antes_de_adjuntar=_puede_adjuntar_evidencia,
+)
+
+
 app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
-    routers=[router_plantillas, router_ordenes],
+    routers=[router_plantillas, router_ordenes, router_evidencias],
 )

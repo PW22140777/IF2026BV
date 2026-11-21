@@ -120,6 +120,14 @@ class Asignacion(BaseModel):
     tecnicos: list[int] = Field(min_length=1, max_length=10, description="Uno o más técnicos")
 
 
+class Terminacion(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    resultado: Resultado
+    respuestas: dict[str, Any] = Field(default_factory=dict, description="Lo que pide la lista de verificación")
+    notas: str | None = Field(default=None, max_length=4000)
+
+
 class Cancelacion(BaseModel):
     motivo: str = Field(min_length=5, max_length=500)
 

@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { legible } from '../recursos'
+import { CamposDelTipo, propiedadAApi } from './Formulario'
+import { Adjuntos } from './Adjuntos'
 
 const FILTROS = [
   ['abiertas', 'Abiertas', { estado: 'PROGRAMADA,EN_CURSO' }],
@@ -11,6 +13,7 @@ const FILTROS = [
   ['canceladas', 'Canceladas', { estado: 'CANCELADA' }],
   ['todas', 'Todas', {}],
 ]
+const RESULTADOS = [['RESUELTO', 'Resuelto'], ['PARCIAL', 'Parcial'], ['NO_RESUELTO', 'No resuelto']]
 const TONO = { PROGRAMADA: 'neutro', EN_CURSO: 'medio', TERMINADA: 'bien', CANCELADA: 'mal' }
 const ORIGENES = { ESTADO: 'Por estado del recurso', PERIODICO: 'Periódica', MANUAL: 'Programada a mano' }
 const NOMBRES_ROL = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico' }
@@ -19,6 +22,12 @@ const dia = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { d
 
 export function EstadoOrden({ valor }) {
   return <span className={`estado estado-${TONO[valor] || 'neutro'}`}>{legible(valor)}</span>
+}
+
+// Duración legible entre dos fechas: «1 h 25 min»
+function duracion(inicio, fin) {
+  const minutos = Math.round((Date.parse(fin) - Date.parse(inicio)) / 60000)
+  return minutos >= 60 ? `${Math.floor(minutos / 60)} h ${minutos % 60} min` : `${minutos} min`
 }
 
 function AsignarTecnicos({ orden, alGuardar }) {
@@ -56,6 +65,54 @@ function AsignarTecnicos({ orden, alGuardar }) {
   )
 }
 
+function Terminar({ orden, alTerminar }) {
+  const [respuestas, setRespuestas] = useState({})
+  const [resultado, setResultado] = useState('RESUELTO')
+  const [notas, setNotas] = useState('')
+  const [error, setError] = useState('')
+  const [enviando, setEnviando] = useState(false)
+
+  async function enviar(e) {
+    e.preventDefault()
+    setError('')
+    const datos = {}
+    for (const d of orden.lista_verificacion) {
+      const texto = respuestas[d.clave] ?? ''
+      if (texto !== '') datos[d.clave] = propiedadAApi(d, texto)
+    }
+    setEnviando(true)
+    try {
+      await alTerminar({ resultado, respuestas: datos, notas: notas.trim() || null })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <form className="seccion-detalle" onSubmit={enviar}>
+      <h4>Registrar lo que se hizo</h4>
+      <CamposDelTipo titulo="Lista de verificación" definiciones={orden.lista_verificacion} valores={respuestas}
+                     alCambiar={(clave, valor) => setRespuestas((r) => ({ ...r, [clave]: valor }))} />
+      <div className="campo">
+        <label htmlFor="orden-resultado">Resultado<span className="requerido" aria-hidden="true"> *</span></label>
+        <select id="orden-resultado" value={resultado} onChange={(e) => setResultado(e.target.value)}>
+          {RESULTADOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
+      </div>
+      <div className="campo">
+        <label htmlFor="orden-notas">Notas</label>
+        <textarea id="orden-notas" rows={3} maxLength={4000} value={notas} onChange={(e) => setNotas(e.target.value)} />
+      </div>
+      {error && <p className="aviso aviso-error" role="alert">{error}</p>}
+      <div className="acciones">
+        <button type="submit" className="boton-principal" disabled={enviando}>{enviando ? 'Guardando…' : 'Terminar mantenimiento'}</button>
+      </div>
+    </form>
+  )
+}
+
 function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
   const [error, setError] = useState('')
   const [cancelando, setCancelando] = useState(false)
@@ -78,6 +135,13 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
     }
   }
 
+  const etiqueta = (clave) => orden.lista_verificacion.find((d) => d.clave === clave)
+  const valorRespuesta = (clave, valor) => {
+    const d = etiqueta(clave)
+    if (typeof valor === 'boolean') return valor ? 'Sí' : 'No'
+    return `${valor}${d?.unidad ? ` ${d.unidad}` : ''}`
+  }
+
   return (
     <aside className="panel-detalle" aria-label={`Orden de mantenimiento ${orden.id}`}>
       <header className="detalle-encabezado">
@@ -91,6 +155,9 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
         <div><dt>Origen</dt><dd>{ORIGENES[orden.origen] || orden.origen}</dd></div>
         <div><dt>Técnicos</dt><dd>{orden.asignados.map((a) => a.nombre).join(', ') || 'Sin asignar'}</dd></div>
         {orden.iniciada_en && <div><dt>Inició</dt><dd>{orden.iniciada_por_nombre}, {fecha(orden.iniciada_en)}</dd></div>}
+        {orden.terminada_en && <div><dt>Terminó</dt><dd>{orden.terminada_por_nombre}, {fecha(orden.terminada_en)}</dd></div>}
+        {orden.terminada_en && <div><dt>Duración</dt><dd>{duracion(orden.iniciada_en, orden.terminada_en)}</dd></div>}
+        {orden.resultado && <div><dt>Resultado</dt><dd>{legible(orden.resultado, 'resultado')}</dd></div>}
         {orden.motivo_cancelacion && <div><dt>Motivo de cancelación</dt><dd>{orden.motivo_cancelacion}</dd></div>}
       </dl>
 
@@ -106,6 +173,21 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
       {orden.estado === 'PROGRAMADA' && !atiende && usuario.rol === 'TECNICO' && (
         <p className="tenue">Esta orden está asignada a otros técnicos{orden.tecnicos.length ? '' : ' (todavía sin asignar)'}.</p>
       )}
+      {orden.estado === 'EN_CURSO' && atiende && <Terminar orden={orden} alTerminar={(datos) => ejecutar('/terminar', 'POST', datos)} />}
+
+      {orden.estado === 'TERMINADA' && (
+        <section className="seccion-detalle">
+          <h4>Lo que se registró</h4>
+          {Object.keys(orden.respuestas).length === 0 && <p className="tenue">Sin respuestas en la lista de verificación.</p>}
+          <dl className="propiedades">
+            {Object.entries(orden.respuestas).map(([k, v]) => (
+              <div key={k}><dt>{etiqueta(k)?.etiqueta || k}</dt><dd>{valorRespuesta(k, v)}</dd></div>
+            ))}
+          </dl>
+          {orden.notas && <p className="comentario-texto">{orden.notas}</p>}
+        </section>
+      )}
+
       {esAdmin && abierta && <AsignarTecnicos key={orden.tecnicos.join(',')} orden={orden} alGuardar={(tecnicos) => ejecutar('/tecnicos', 'PUT', { tecnicos })} />}
 
       {esAdmin && abierta && (
@@ -122,6 +204,11 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
           <div className="acciones"><button type="button" className="boton-secundario" onClick={() => setCancelando(true)}>Cancelar orden</button></div>
         )
       )}
+
+      {/* Fotos y PDF de lo que se hizo: los suben quienes atienden la orden, mientras no esté cancelada */}
+      <Adjuntos key={orden.id} ruta={`/mantenimientos/ordenes/${orden.id}/evidencias`} titulo="Evidencias"
+                puedeEditar={atiende && orden.estado !== 'CANCELADA'} categoriaInicial="EVIDENCIA"
+                categorias={['EVIDENCIA', 'FOTO', 'DOCUMENTO', 'OTRO']} vacio="Sin evidencias todavía." />
 
     </aside>
   )
