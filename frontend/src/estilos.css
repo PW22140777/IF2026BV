@@ -338,6 +338,20 @@ textarea { resize: vertical; }
 .aviso-ayuda ol { margin: 0.35rem 0 0.75rem; padding-left: 1.2rem; }
 .aviso-ayuda li { margin: 0.2rem 0; }
 
+/* ---------------------------------------------------------------- comentarios */
+.lista-comentarios, .respuestas { list-style: none; margin: 0; padding: 0; }
+.lista-comentarios > li { padding: 0.6rem 0; border-bottom: 1px solid var(--linea-suave); }
+.respuestas { margin: 0.4rem 0 0.2rem 0.9rem; padding-left: 0.75rem; border-left: 2px solid var(--linea); }
+.respuestas > li { padding: 0.35rem 0; }
+.comentario header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.5rem; font-size: 0.9rem; }
+.comentario time { color: var(--grafito); font-size: 0.8rem; }
+.comentario-texto { margin: 0.25rem 0 0.2rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comentario .rol-observador { border-color: var(--foco); color: var(--foco); }
+.comentario .rol-tecnico, .comentario .rol-administrador { border-color: var(--bien); color: var(--bien); }
+.escribir-comentario { margin-top: 0.75rem; }
+.escribir-comentario textarea { width: 100%; }
+.escribir-comentario .acciones { align-items: center; margin-top: 0.4rem; }
+
 /* --------------------------------------------- tipos de elemento y sus propiedades */
 .campos-del-tipo { margin: 0.75rem 0 0; padding: 0.75rem 0.9rem 0.1rem; border: 1px solid var(--linea); border-left: 4px solid var(--senal); border-radius: 0; background: #fbfcfa; }
 .campos-del-tipo legend { font-weight: 700; font-size: 0.9rem; padding: 0 0.3rem; }
@@ -639,6 +653,20 @@ textarea { resize: vertical; }
   border: 1px solid var(--linea); border-left: 5px solid var(--tono); border-radius: var(--radio); color: var(--tinta);
 }
 .medidor-estado { color: var(--tono); font-weight: 700; font-size: 0.82rem; }
+/* Tablero de avisos: los comentarios como notas sobre un corcho */
+.tablero-avisos { background: #d9b382; border: 6px solid #8a6440; border-radius: 6px; padding: 0.25rem 1rem 1rem; margin-top: 1.75rem; }
+.interior .tablero-avisos { margin-top: 0; }
+.tablero-avisos .seccion-detalle { border-top: 0; margin-top: 0; padding-top: 0.6rem; }
+.tablero-avisos h4 { color: #3e2b18; }
+.tablero-avisos .lista-comentarios > li { background: #fffbea; border: 0; border-radius: 2px; padding: 0.6rem 0.75rem; margin-bottom: 0.6rem; box-shadow: 0 2px 0 rgb(0 0 0 / 15%); }
+.tablero-avisos .tenue { color: #4b3520; }
+
+@media (max-width: 900px) {
+  .interior { grid-template-columns: 1fr; }
+  .piso { grid-template-columns: 1fr; }
+  .piso-nombre { padding: 0.4rem 0.7rem; }
+}
+
 /* Archivos adjuntos: miniatura (o PDF) + ficha; quitar pide motivo */
 .adjuntos { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
 .adjuntos li { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 0.75rem; align-items: start;

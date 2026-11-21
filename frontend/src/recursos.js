@@ -57,6 +57,7 @@ export const RECURSOS = {
     titulo: 'Edificios',
     singular: 'edificio',
     ruta: '/edificios',
+    comentable: 'EDIFICIO',   // los Observadores pueden comentarlo
     adjuntos: '/edificios',   // archivos del edificio: nombre + descripción, como en develop
     adjuntosSinCategoria: true,
     fachada: true,            // foto de fachada (PUT /edificios/{id}/fachada)
@@ -86,6 +87,7 @@ export const RECURSOS = {
     titulo: 'Áreas',
     singular: 'área',
     ruta: '/areas',
+    comentable: 'AREA',
     adjuntos: '/areas',
     historial: 'area',
     serviciosFiltro: 'area_id',   // para mostrar sus servicios en el detalle (IF-59)
@@ -112,6 +114,7 @@ export const RECURSOS = {
     titulo: 'Inventario',
     singular: 'elemento',
     ruta: '/inventario',
+    comentable: 'INVENTARIO',
     adjuntos: '/inventario',
     adjuntoInicial: 'FOTO',
     historial: 'inventario',
@@ -180,6 +183,7 @@ export const RECURSOS = {
     titulo: 'Agua y luz',
     singular: 'servicio',
     ruta: '/servicios',
+    comentable: 'SERVICIO',
     historial: 'servicio',
     nombre: (r) => r.nombre,
     columnas: [
@@ -207,6 +211,7 @@ export const RECURSOS = {
     titulo: 'Consumos',
     singular: 'consumo',
     ruta: '/consumos',
+    comentable: 'CONSUMO',
     historial: 'consumo',
     nombre: (r) => `Consumo de ${r.periodo?.slice(0, 7)}`,
     cantidadConUnidad: true,

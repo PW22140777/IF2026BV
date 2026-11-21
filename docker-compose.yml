@@ -98,6 +98,15 @@ services:
     volumes:
       - llaves_audit:/data/llaves   # la llave de firma sobrevive a reinicios
 
+  comentarios:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/comentarios } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: comentarios
+      ARCHIVOS_TOKEN_INTERNO: ${ARCHIVOS_TOKEN_INTERNO:?Define ARCHIVOS_TOKEN_INTERNO en .env}
+      DATABASE_URL: ${DATABASE_URL_COMENTARIOS:-postgresql+psycopg://comentarios_svc:${DB_PASS_COMENTARIOS}@postgres:5432/${POSTGRES_DB}}
+
   # Adjuntos (fotos, planos, PDF, evidencias) en un volumen local; no usa la base
   archivos:
     <<: *backend

@@ -6,6 +6,7 @@ import { legible } from '../recursos'
 import { resumenDefiniciones } from './EditorDefiniciones'
 import { Adjuntos, FotoFachada } from './Adjuntos'
 import { apiFormulario } from '../api'
+import { Comentarios } from './Comentarios'
 import { Formulario } from './Formulario'
 import { Historial } from './Historial'
 
@@ -246,6 +247,10 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
         <Adjuntos key={registro.id} ruta={`${config.adjuntos}/${registro.id}/archivos`} puedeEditar={puedeEditar}
                   categoriaInicial={config.adjuntoInicial} conCategoria={!config.adjuntosSinCategoria}
                   titulo={config.adjuntosSinCategoria ? 'Archivos del edificio' : undefined} />
+      )}
+
+      {config.comentable && !registro.eliminado_en && (
+        <Comentarios recurso={config.comentable} id={registro.id} usuario={usuario} />
       )}
 
       <section className="seccion-detalle">

@@ -7,6 +7,7 @@ import { api } from '../api'
 import { useCatalogos } from '../catalogos'
 import { legible } from '../recursos'
 import { Adjuntos, FotoFachada } from './Adjuntos'
+import { Comentarios } from './Comentarios'
 
 // Color de cada estado: bien (verde), atención (ámbar), mal (rojo)
 const TONO = {
@@ -64,6 +65,8 @@ function Medidores({ servicios, usuario }) {
           </li>
         ))}
       </ul>
+      {elegido && <Comentarios key={elegido.id} recurso="SERVICIO" id={elegido.id} usuario={usuario}
+                               titulo={`Avisos de ${elegido.nombre}`} />}
     </>
   )
 }
@@ -232,6 +235,9 @@ function Edificio({ edificio, usuario, alIr, directorio }) {
       {/* Fotos y planos: el Observador solo los ve; en la sección «Edificios» se suben */}
       <Adjuntos key={edificio.id} ruta={`/edificios/${edificio.id}/archivos`} titulo="Archivos del edificio"
                 vacio="Este edificio todavía no tiene archivos." conCategoria={false} />
+      <div className="tablero-avisos">
+        <Comentarios recurso="EDIFICIO" id={edificio.id} usuario={usuario} titulo="Tablero de avisos del edificio" />
+      </div>
     </div>
   )
 }
@@ -322,6 +328,10 @@ function Salon({ area, usuario, directorio }) {
                   </li>
                 ))}
               </ul>
+              {elementoAbierto && (
+                <Comentarios key={elementoAbierto} recurso="INVENTARIO" id={elementoAbierto} usuario={usuario}
+                             titulo="Avisos de este registro" />
+              )}
             </div>
           )}
 
@@ -331,6 +341,9 @@ function Salon({ area, usuario, directorio }) {
                     vacio="Esta área todavía no tiene fotos ni planos." />
         </section>
 
+        <div className="tablero-avisos">
+          <Comentarios recurso="AREA" id={area.id} usuario={usuario} titulo="Tablero de avisos" />
+        </div>
       </div>
     </div>
   )
