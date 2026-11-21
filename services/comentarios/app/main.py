@@ -7,6 +7,8 @@ Reglas:
 - Consulta solo los lee.
 - Solo el Administrador oculta un comentario: borrado lógico con motivo, queda en el historial.
 - Los hilos tienen un nivel: se responde al comentario original, no a otra respuesta.
+- Un Observador puede adjuntar hasta 4 fotos a su comentario (POST /comentarios/con-fotos).
+  Las guarda archivos-service; aquí queda su ficha en archivos_adjuntos (recurso COMENTARIO).
 """
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -17,6 +19,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from comun import almacenamiento
+from comun.adjuntos import foto as foto_adjunto
 from comun.app import crear_app
 from comun.db import get_db
 from comun.historial import registrar_evento
@@ -39,6 +43,7 @@ QUIENES_ESCRIBEN = (OBSERVADOR,)
 # El Observador no ve consumos: tampoco los comenta ni lee sus comentarios
 SOLO_INTERNOS = {"CONSUMO"}
 MAXIMO_POR_MINUTO = 10
+MAXIMO_FOTOS = 4          # fotos por comentario   # evita que una cuenta llene un recurso de comentarios
 
 
 # ------------------------------------------------------------------ esquemas
@@ -66,9 +71,17 @@ class ComentarioSalida(BaseModel):
     motivo_eliminacion: str | None
 
 
+class FotoComentario(BaseModel):
+    id: int
+    nombre_original: str
+    tamano_bytes: int
+    url: str | None = None      # firmada y con caducidad; None si el almacén no respondió
+
+
 class ComentarioConAutor(ComentarioSalida):
     autor_nombre: str
     autor_rol: str
+    fotos: list[FotoComentario] = []
 
 
 def _revisar_alcance(recurso: str, usuario: UsuarioToken) -> None:
@@ -103,9 +116,19 @@ async def listar(
     consulta = consulta.where(Comentario.eliminado_en.is_(None))
     filas = (await db.execute(consulta)).all()
     visibles = {c.id for c, _, _ in filas}
+    # Fotos de todos los comentarios en una consulta, y sus URL en una sola llamada a archivos-service
+    fotos = (await db.execute(select(ArchivoAdjunto).where(
+        ArchivoAdjunto.recurso == "COMENTARIO", ArchivoAdjunto.recurso_id.in_(visibles),
+        ArchivoAdjunto.eliminado_en.is_(None)).order_by(ArchivoAdjunto.id))).scalars().all() if visibles else []
+    urls = await almacenamiento.urls(sorted({f.clave for f in fotos}))
+    por_comentario: dict[int, list[FotoComentario]] = {}
+    for f in fotos:
+        por_comentario.setdefault(f.recurso_id, []).append(FotoComentario(
+            id=f.id, nombre_original=f.nombre_original, tamano_bytes=f.tamano_bytes, url=urls.get(f.clave)))
     # Una respuesta cuyo comentario original se ocultó tampoco se muestra
     return [
-        ComentarioConAutor(**ComentarioSalida.model_validate(c).model_dump(), autor_nombre=nombre, autor_rol=rol)
+        ComentarioConAutor(**ComentarioSalida.model_validate(c).model_dump(), autor_nombre=nombre, autor_rol=rol,
+                           fotos=por_comentario.get(c.id, []))
         for c, nombre, rol in filas
         if c.respuesta_a is None or c.respuesta_a in visibles
     ]
@@ -120,6 +143,55 @@ async def comentar(
     comentario = await _crear_comentario(db, datos, usuario)
     await db.commit()
     return comentario
+
+
+@router.post("/con-fotos", response_model=ComentarioConAutor, status_code=201,
+             summary="Comentar con 1 a 4 fotos (solo Observadores; multipart)")
+async def comentar_con_fotos(
+    recurso: RecursoComentable = Form(),
+    recurso_id: int = Form(gt=0),
+    texto: str = Form(min_length=1, max_length=2000),
+    respuesta_a: int | None = Form(default=None, gt=0),
+    fotos: list[UploadFile] = File(description="JPG, PNG o WebP, hasta 10 MB cada una"),
+    usuario: UsuarioToken = Depends(requiere_rol(OBSERVADOR)),
+    db: AsyncSession = Depends(get_db),
+):
+    if not 1 <= len(fotos) <= MAXIMO_FOTOS:
+        raise HTTPException(422, f"Adjunta de 1 a {MAXIMO_FOTOS} fotos por comentario")
+    try:
+        datos = ComentarioCrear(recurso=recurso, recurso_id=recurso_id, texto=texto, respuesta_a=respuesta_a)
+    except ValidationError:
+        raise HTTPException(422, "Escribe el texto del comentario (de 1 a 2000 caracteres)")
+    comentario = await _crear_comentario(db, datos, usuario)   # valida todo antes de guardar fotos
+    guardadas: list[dict] = []
+    try:
+        for archivo in fotos:
+            guardadas.append(await almacenamiento.guardar(f"comentarios/{comentario.id}", archivo, categoria="imagen"))
+        salida = []
+        for archivo, g in zip(fotos, guardadas):
+            adjunto = ArchivoAdjunto(
+                recurso="COMENTARIO", recurso_id=comentario.id, nombre=(archivo.filename or "foto")[:120],
+                categoria="FOTO", nombre_original=(archivo.filename or "foto")[:200], tipo_mime=g["tipo_mime"],
+                tamano_bytes=g["tamano_bytes"], sha256=g["sha256"], clave=g["clave"], propiedades={},
+                creado_por=usuario.id, creado_en=datetime.now(timezone.utc))
+            db.add(adjunto)
+            await db.flush()
+            await registrar_evento(db, accion="CREAR", recurso="ARCHIVO", recurso_id=adjunto.id, usuario=usuario,
+                                   despues=foto_adjunto(adjunto))
+            salida.append(FotoComentario(id=adjunto.id, nombre_original=adjunto.nombre_original,
+                                         tamano_bytes=adjunto.tamano_bytes, url=g.get("url")))
+        await db.commit()
+    except Exception:
+        # Si una foto no pasa (tipo, tamaño) no queda nada: ni el comentario ni las fotos ya guardadas
+        await db.rollback()
+        for g in guardadas:
+            try:
+                await almacenamiento.borrar(g["clave"])
+            except HTTPException:
+                log.warning("foto_de_comentario_no_borrada", clave=g["clave"])
+        raise
+    return ComentarioConAutor(**ComentarioSalida.model_validate(comentario).model_dump(),
+                              autor_nombre=usuario.nombre, autor_rol=usuario.rol, fotos=salida)
 
 
 async def _crear_comentario(db: AsyncSession, datos: "ComentarioCrear", usuario: UsuarioToken) -> Comentario:
