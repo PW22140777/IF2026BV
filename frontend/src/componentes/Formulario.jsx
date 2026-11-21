@@ -255,6 +255,8 @@ export function Formulario({ config, registro, alGuardar, alCancelar, campusActi
             </optgroup>
           </select>
         )
+      case 'enlace':   // sin type="url": el servidor completa https:// si falta
+        return <input type="text" inputMode="url" maxLength={500} placeholder="https://drive.google.com/…" {...comun} />
       default:
         return <input type="text" {...comun} />
     }

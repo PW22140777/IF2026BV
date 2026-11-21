@@ -112,6 +112,23 @@ function mensajeDeError(datos, estado) {
   return `Error ${estado}`
 }
 
+// Envía un formulario con archivos (multipart); el navegador pone el Content-Type con su separador
+export async function apiFormulario(ruta, formulario, metodo = 'POST') {
+  await renovarSiHaceFalta()
+  const r = await fetch(BASE + ruta, {
+    method: metodo,
+    headers: sesion ? { Authorization: `Bearer ${sesion.token}` } : {},
+    body: formulario,
+  })
+  const datos = await r.json().catch(() => null)
+  if (r.status === 401) {
+    cerrarSesion()
+    alExpirar(mensajeDeError(datos, r.status))
+  }
+  if (!r.ok) throw new Error(mensajeDeError(datos, r.status))
+  return datos
+}
+
 export async function api(ruta, { metodo = 'GET', cuerpo, consulta } = {}) {
   await renovarSiHaceFalta()
   const url = new URL(BASE + ruta, window.location.origin)

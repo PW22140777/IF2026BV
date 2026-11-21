@@ -262,6 +262,44 @@ async def cambiar_contrasena(datos: CambioContrasena,
     return _respuesta_sesion(usuario, await db.get(Sesion, actual.sesion_id))
 
 
+@router_auth.get("/perfil", summary="Perfil propio: datos, forma de entrar y sesiones abiertas")
+async def perfil(actual: UsuarioToken = Depends(requiere_rol(*TODOS)), db: AsyncSession = Depends(get_db)):
+    usuario = await db.get(Usuario, actual.id)
+    ahora = datetime.now(timezone.utc)
+    # Solo las sesiones vigentes: no revocadas y sin expirar
+    abiertas = (await db.execute(
+        select(Sesion).where(Sesion.usuario_id == actual.id, Sesion.revocada_en.is_(None), Sesion.expira_en > ahora)
+        .order_by(Sesion.creada_en.desc())
+    )).scalars().all()
+    return {
+        "nombre": usuario.nombre,
+        "email": usuario.email,
+        "rol": usuario.rol,
+        "acceso": usuario.proveedor_oauth or "contrasena",   # "google", "microsoft" o "contrasena"
+        "creado_en": usuario.creado_en,
+        # El id de la sesión no se muestra: basta saber cuál es la actual
+        "sesiones": [{"creada_en": s.creada_en, "expira_en": s.expira_en, "ip": s.ip,
+                      "actual": s.id == actual.sesion_id} for s in abiertas],
+    }
+
+
+@router_auth.post("/cerrar-otras-sesiones", summary="Cerrar las demás sesiones abiertas con mi cuenta")
+async def cerrar_otras_sesiones(actual: UsuarioToken = Depends(requiere_rol(*TODOS)),
+                                db: AsyncSession = Depends(get_db)):
+    ahora = datetime.now(timezone.utc)
+    otras = (await db.execute(
+        select(Sesion.id).where(Sesion.usuario_id == actual.id, Sesion.revocada_en.is_(None),
+                                Sesion.expira_en > ahora, Sesion.id != actual.sesion_id)
+    )).scalars().all()
+    if otras:
+        # Útil si dejaste la sesión abierta en otra computadora; la actual sigue abierta
+        await _revocar_sesiones(db, actual.id, "Cerrada por su dueño desde su perfil", excepto=actual.sesion_id)
+        await registrar_evento(db, accion="LOGOUT", recurso="SESION", recurso_id=actual.id, usuario=actual,
+                               despues={"sesiones_cerradas": len(otras)}, motivo="Cerrar las demás sesiones")
+        await db.commit()
+    return {"cerradas": len(otras)}
+
+
 @router_auth.get("/yo", summary="Datos del usuario de la sesión actual")
 async def yo(usuario: UsuarioToken = Depends(requiere_rol(*TODOS, aunque_deba_cambiar_contrasena=True))):
     return {"id": usuario.id, "nombre": usuario.nombre, "rol": usuario.rol,

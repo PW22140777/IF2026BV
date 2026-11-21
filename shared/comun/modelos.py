@@ -41,7 +41,7 @@ class Usuario(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     nombre: Mapped[str]
     email: Mapped[str]
-    hash_contrasena: Mapped[str]
+    hash_contrasena: Mapped[str | None]   # None en un Observador: entra solo con Microsoft
     rol: Mapped[str]
     activo: Mapped[bool] = mapped_column(default=True)
     debe_cambiar_contrasena: Mapped[bool] = mapped_column(default=False)   # tiene una contraseña temporal
@@ -49,6 +49,8 @@ class Usuario(Base):
     creado_por: Mapped[int | None]
     modificado_en: Mapped[datetime | None]
     modificado_por: Mapped[int | None]
+    proveedor_oauth: Mapped[str | None]   # p. ej. "microsoft"
+    sujeto_oauth: Mapped[str | None]      # identificador estable de la persona en ese proveedor
 
 
 class Sesion(Base):
@@ -64,6 +66,18 @@ class Sesion(Base):
     revocada_en: Mapped[datetime | None]
     motivo_revocacion: Mapped[str | None]
     ip: Mapped[str | None]
+
+
+class OauthCanje(Base):
+    """Código de un solo uso que el navegador cambia por el JWT tras entrar con Microsoft."""
+
+    __tablename__ = "oauth_canjes"
+
+    hash_codigo: Mapped[str] = mapped_column(primary_key=True)   # SHA-256 del código, nunca el código
+    sesion_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("sesiones.id"))
+    creado_en: Mapped[datetime] = mapped_column(default=ahora)
+    expira_en: Mapped[datetime]
+    usado_en: Mapped[datetime | None]
 
 
 # ---------------------------------------------------------------- inmuebles
@@ -95,6 +109,8 @@ class Edificio(ConResponsabilidad, Base):
     superficie_m2: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
     estado: Mapped[str] = mapped_column(default="OPERATIVO")
     descripcion: Mapped[str | None]
+    carpeta_planos: Mapped[str | None]    # enlace a una carpeta externa (Drive, OneDrive...)
+    fachada_s3: Mapped[str | None]        # clave de la foto de fachada en archivos-service (mismo nombre que en develop)
     propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
 
 
@@ -202,6 +218,101 @@ class EventoProcesado(Base):
     consumidor: Mapped[str] = mapped_column(primary_key=True)
     evento_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     procesado_en: Mapped[datetime] = mapped_column(default=ahora)
+
+
+# ---------------------------------------------------------- archivos adjuntos
+class ArchivoAdjunto(ConResponsabilidad, Base):
+    """Ficha de un archivo adjunto; el archivo lo guarda archivos-service bajo `clave`."""
+
+    __tablename__ = "archivos_adjuntos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO, ORDEN_MANTENIMIENTO o COMENTARIO
+    recurso_id: Mapped[int]
+    nombre: Mapped[str]
+    descripcion: Mapped[str | None]
+    categoria: Mapped[str]                # FOTO, PLANO, DOCUMENTO, EVIDENCIA u OTRO
+    nombre_original: Mapped[str]
+    tipo_mime: Mapped[str]
+    tamano_bytes: Mapped[int]
+    sha256: Mapped[str]
+    clave: Mapped[str]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+# -------------------------------------------------------------- comentarios
+class Comentario(ConResponsabilidad, Base):
+    """Comentario de un Observador sobre un recurso, o la respuesta de un Técnico o Administrador."""
+
+    __tablename__ = "comentarios"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    recurso: Mapped[str]                  # EDIFICIO, AREA, INVENTARIO, SERVICIO o CONSUMO
+    recurso_id: Mapped[int]
+    respuesta_a: Mapped[int | None] = mapped_column(ForeignKey("comentarios.id"))
+    texto: Mapped[str]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+# ------------------------------------------------------------ mantenimientos
+class PlantillaMantenimiento(ConResponsabilidad, Base):
+    """A qué recursos aplica un mantenimiento, cuándo se abre, qué se registra y cómo queda el recurso."""
+
+    __tablename__ = "plantillas_mantenimiento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    nombre: Mapped[str]
+    descripcion: Mapped[str | None]
+    recurso: Mapped[str]                     # EDIFICIO, AREA, INVENTARIO o SERVICIO
+    tipo_elemento: Mapped[str | None]        # solo inventario
+    disparo: Mapped[str]                     # ESTADO, PERIODICO o MANUAL
+    estados_disparo: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    cada_dias: Mapped[int | None]
+    estado_al_iniciar: Mapped[str | None]
+    estado_resuelto: Mapped[str]
+    estado_parcial: Mapped[str]
+    estado_no_resuelto: Mapped[str]
+    lista_verificacion: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    activa: Mapped[bool] = mapped_column(default=True)
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class OrdenMantenimiento(ConResponsabilidad, Base):
+    """Un mantenimiento concreto: Programada -> En curso -> Terminada (o Cancelada)."""
+
+    __tablename__ = "ordenes_mantenimiento"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plantilla_id: Mapped[int] = mapped_column(ForeignKey("plantillas_mantenimiento.id"))
+    recurso: Mapped[str]
+    recurso_id: Mapped[int]
+    origen: Mapped[str]                      # ESTADO, PERIODICO o MANUAL
+    estado: Mapped[str] = mapped_column(default="PROGRAMADA")
+    fecha_programada: Mapped[date] = mapped_column(default=date.today)
+    iniciada_en: Mapped[datetime | None]
+    iniciada_por: Mapped[int | None]
+    terminada_en: Mapped[datetime | None]
+    terminada_por: Mapped[int | None]
+    resultado: Mapped[str | None]            # RESUELTO, PARCIAL o NO_RESUELTO
+    respuestas: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    notas: Mapped[str | None]
+    estado_recurso_nuevo: Mapped[str | None]
+    motivo_cancelacion: Mapped[str | None]
+    propiedades: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+
+
+class OrdenTecnico(Base):
+    """Técnico asignado a una orden. Quitarlo marca quitado_en; la fila no se borra."""
+
+    __tablename__ = "ordenes_tecnicos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    orden_id: Mapped[int] = mapped_column(ForeignKey("ordenes_mantenimiento.id"))
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
+    asignado_en: Mapped[datetime] = mapped_column(default=ahora)
+    asignado_por: Mapped[int | None]
+    quitado_en: Mapped[datetime | None]
+    quitado_por: Mapped[int | None]
 
 
 # -------------------------------------------------------------------- audit

@@ -67,7 +67,7 @@ Para borrar todo y empezar de cero (base de datos, colas y llave de firma): `doc
 
 ## Recorrido sugerido para la presentación
 
-1. Entra como **Técnico**. Los campus son fijos (Campus Centro y Campus Norte): elige «Campus Centro» en el selector «Campus con el que trabajas» del menú y desde ese momento todas las pantallas muestran solo lo de ese campus. Crea el edificio `ED-A` con 2 niveles, el área «Laboratorio 3» en su piso 1 (la lista de pisos solo ofrece los que existen) y el área «Cancha» sin edificio.
+1. Entra como **Técnico**. Los campus son fijos (Campus Centro y Campus Norte): elige «Campus Centro» en el selector «Campus con el que trabajas» de la barra superior y desde ese momento todas las pantallas muestran solo lo de ese campus. Crea el edificio `ED-A` con 2 niveles, el área «Laboratorio 3» en su piso 1 (la lista de pisos solo ofrece los que existen) y el área «Cancha» sin edificio.
 2. En **Inventario**, agrega un aire acondicionado al laboratorio: al elegir el tipo aparecen sus propiedades y la capacidad (`12000` BTU) es obligatoria. Luego cambia su estado a «Fuera de servicio». En el panel de la derecha, el **Historial** muestra quién cambió qué. Como Administrador, en **Tipos de elemento** puedes ver o cambiar qué propiedades pide cada tipo.
 3. En **Agua y luz**, crea una toma de agua para la cancha. Cambia su estado a «Con falla»: en **Resumen** (o filtrando por estado) aparece como servicio con falla. Luego elimina la cancha indicando un motivo: unos segundos después la toma aparece como inactiva. Ese cambio lo hizo `servicios-service` al recibir el evento por RabbitMQ (puedes verlo en http://localhost:15672).
 4. Entra como **Consulta**: puede ver todo y el resumen, pero no hay botones para modificar. Si intentas la API directamente, responde `403`.
@@ -110,7 +110,8 @@ Para borrar todo y empezar de cero (base de datos, colas y llave de firma): `doc
 ## Arquitectura
 
 ```text
-Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / audit ──> PostgreSQL (única)
+Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (única)
+                 │                         └── inmuebles / mantenimiento ──> archivos ──> volumen datos_archivos
                  │                                    │
                  └── frontend (Nginx)                 └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                          └────> servicios (reacciones)
@@ -125,6 +126,9 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON
 
 - Un cambio de rol aplica en la siguiente petición, y desactivar una cuenta cierra sus sesiones al instante.
 - «Cerrar sesión» invalida el token en el servidor, aunque alguien lo haya copiado.
+- En «Mi perfil» (GET /auth/perfil) cada quien ve sus datos, lo que puede hacer su rol, cómo entra y sus sesiones abiertas, y puede cerrar las demás con POST /auth/cerrar-otras-sesiones (la actual sigue abierta).
+- «Mi perfil», «Cambiar contraseña» y «Cerrar sesión» están en el menú del usuario, a la derecha de la barra superior; ahí también está el selector de campus.
+- El panel de detalle (ver y editar un registro) tiene tamaño fijo: en computadora, de 340 a 460 px de ancho según la pantalla (`--ancho-panel`) y el alto de la ventana; en tableta y teléfono flota encima de la lista. Todo su contenido se ajusta a ese ancho: los textos largos, aunque no tengan espacios (claves, enlaces, valores del historial), se parten en varias líneas, así que nada ensancha la página. Si el contenido es más alto, solo el panel se desplaza hacia abajo.
 - La sesión se cierra tras 30 minutos sin actividad y, como máximo, 4 horas después de entrar (`SESION_INACTIVIDAD_MINUTOS` y `SESION_MAXIMA_HORAS` en `.env`). Mientras trabajas, el frontend la renueva sola con `/auth/renovar`.
 
 Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_contrasena` de `usuarios`: nunca el hash de la contraseña.
@@ -147,6 +151,45 @@ Los servicios solo pueden leer `id`, `nombre`, `rol`, `activo` y `debe_cambiar_c
 - El estado de un servicio (operando, con falla, suspendido, en mantenimiento) se actualiza como cualquier otro campo y queda en su historial; `/resumen/servicios` lista los que no están operando con normalidad.
 - No se puede eliminar un campus con edificios o áreas activos. Al eliminarlo, sus servicios generales quedan inactivos automáticamente (evento por RabbitMQ). Para restaurar un edificio o un área, su campus debe estar activo.
 - Todas las listas, el resumen y las rutas de la API aceptan `?campus_id=` para filtrar.
+
+## Archivos adjuntos (fotos, planos, PDF y evidencias)
+
+Se aceptan JPG, PNG, WebP y PDF de hasta 10 MB. Los edificios tienen las mismas propiedades con archivo que en la rama `develop` de IF2026B:
+
+| Propiedad del edificio | Qué guarda | Cómo se cambia |
+| --- | --- | --- |
+| Foto de fachada (`fachada_s3`, y `fachada_url` firmada en las respuestas) | Una imagen (JPG, PNG o WebP); la nueva reemplaza a la anterior, que se borra del almacén | `PUT /edificios/{id}/fachada` o «Agregar / Cambiar foto de fachada» en el panel |
+| Archivos del edificio | Varios archivos con nombre y descripción (planos, dictámenes, fotos) | `/edificios/{id}/archivos` o la sección «Archivos del edificio» |
+| Carpeta de planos (`carpeta_planos`) | Un enlace a una carpeta externa (Drive, OneDrive); sin `https://` se le agrega, y `javascript:` se rechaza | En el formulario del edificio |
+
+Además de lo de `develop`, las áreas y el inventario tienen **«Fotos y documentos»** (con tipo: foto, plano, documento u otro) y cada orden de mantenimiento tiene **«Evidencias»**. En el «Recorrido», el Observador ve la fachada, la carpeta de planos y los archivos de edificios y áreas, pero no las evidencias.
+
+| Rol | Puede |
+| --- | --- |
+| Administrador, Técnico | Subir y quitar adjuntos de edificios, áreas e inventario (quitar pide motivo) |
+| Técnicos asignados, Administrador | Subir y quitar evidencias de una orden que no esté cancelada |
+| Consulta | Ver todo lo anterior |
+| Observador | Ver las fotos y planos de edificios, áreas e inventario, y adjuntar hasta 4 fotos a sus comentarios |
+
+**Cómo funciona.**
+
+1. El navegador sube el archivo a `POST /api/v1/edificios/{id}/archivos` (o `/areas`, `/inventario`, `/mantenimientos/ordenes/{id}/evidencias`).
+2. `inmuebles-service` (o `mantenimiento-service`) se lo pasa a **`archivos-service`** por la red interna con `X-Token-Interno` (`comun/almacenamiento.py`).
+3. `archivos-service` decide el tipo por los primeros bytes del archivo, no por su nombre, así que un HTML o SVG disfrazado de imagen se rechaza. Lo guarda en el volumen de Docker `datos_archivos`, con su SHA-256 como nombre (`edificios/7/<sha256>.png`).
+4. El servicio guarda la ficha en `archivos_adjuntos` (nombre, tipo, tamaño, SHA-256, clave, quién lo subió) y deja el evento `archivo.creado.v1` en el historial firmado.
+5. Al listar, cada archivo trae una **URL firmada que caduca en 1 hora**: `/api/v1/archivos/descarga?clave=…&expira=…&firma=…`. Es la única ruta pública de `archivos-service`. Un `<img src>` no puede mandar el JWT, así que el permiso va en la firma HMAC (`ARCHIVOS_SECRETO_FIRMA`); alterada o vencida responde 403.
+
+**Quitar un adjunto** pide motivo: la ficha queda con borrado lógico y en el historial (`ARCHIVO`), y **el archivo sí se borra del almacén**, salvo que otra ficha activa use el mismo contenido. Es la excepción a «nada se borra físicamente», porque un archivo no tiene historial propio.
+
+**Dónde se guardan.** `ARCHIVOS_BACKEND=local` usa el volumen `datos_archivos`. Para respaldarlo:
+
+```bash
+docker run --rm -v infraestructura-fisica-bv_datos_archivos:/datos -v "$PWD":/respaldo alpine tar czf /respaldo/archivos.tgz -C /datos .
+```
+
+La versión para S3 vive en la rama `develop` de IF2026B. Al unirlas se agrega como otro backend de `archivos-service` (guardar, URL, borrar); `inmuebles` y `mantenimiento` no cambian. Diferencia con `develop`: aquí los archivos del edificio van en `archivos_adjuntos` (con `recurso = 'EDIFICIO'`), no en `archivos_edificio`; esa tabla sigue en el esquema por compatibilidad, pero este código no la usa.
+
+**Base que ya existe:** aplica `db/migraciones/009_archivos_adjuntos.sql` como dueño de la base. En `.env` agrega `ARCHIVOS_SECRETO_FIRMA` y `ARCHIVOS_TOKEN_INTERNO` (32 caracteres o más cada uno; ver `.env.example`).
 
 ## Tipos de elemento y sus propiedades
 
@@ -236,6 +279,7 @@ JSONB. Los resultados se redondean a cuatro decimales.
 │   ├── auth/                login, JWT y usuarios
 │   ├── inmuebles/           campus, edificios, áreas e inventario
 │   ├── servicios/           agua, luz, internet, alcantarillado, su estado y consumos
+│   ├── archivos/            adjuntos en un volumen local, enlaces de descarga firmados
 │   └── audit/               historial firmado y verificación
 ├── gateway/                 API Gateway
 ├── frontend/                interfaz web (React)

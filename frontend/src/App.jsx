@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { alActualizarSesion, alCerrarSesion, iniciarSesion, salir, sesionActual } from './api'
 import { ProveedorCatalogos, useCatalogos } from './catalogos'
 import { Auditoria } from './componentes/Auditoria'
+import { BarraSuperior } from './componentes/BarraSuperior'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
+import { Perfil } from './componentes/Perfil'
 import { Resumen } from './componentes/Resumen'
 import { Usuarios } from './componentes/Usuarios'
 import { RECURSOS } from './recursos'
 
-const NOMBRES_ROL = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico', CONSULTA: 'Consulta' }
 
 // Menú: qué ve cada rol
 const SECCIONES = [
@@ -35,6 +36,11 @@ function SelectorCampus({ valor, alCambiar }) {
       </select>
     </div>
   )
+}
+
+// Grupos del menú que la persona dejó abiertos (se recuerdan en este navegador)
+function leerGruposAbiertos() {
+  try { return JSON.parse(localStorage.getItem('menu-grupos-abiertos')) || [] } catch { return [] }
 }
 
 function leerCampusGuardado() {
@@ -95,6 +101,20 @@ export default function App() {
   const [mensajeLogin, setMensajeLogin] = useState('')
   const [campusActivo, setCampusActivo] = useState(leerCampusGuardado)
   const [idInicial, setIdInicial] = useState(null)   // registro a abrir al cambiar de sección
+  const [gruposAbiertos, setGruposAbiertos] = useState(leerGruposAbiertos)
+
+  // Menú en acordeón: cada grupo se abre o cierra con su título
+  function cambiarGrupos(nuevos) {
+    setGruposAbiertos(nuevos)
+    try { localStorage.setItem('menu-grupos-abiertos', JSON.stringify(nuevos)) } catch { /* sin almacenamiento */ }
+  }
+  const alternarGrupo = (g) => cambiarGrupos(gruposAbiertos.includes(g) ? gruposAbiertos.filter((x) => x !== g) : [...gruposAbiertos, g])
+
+  // El grupo de la pantalla actual se abre solo (por ejemplo, al llegar desde el Resumen)
+  const grupoActual = SECCIONES.find((s) => s.id === seccion)?.grupo
+  useEffect(() => {
+    if (grupoActual && !gruposAbiertos.includes(grupoActual)) cambiarGrupos([...gruposAbiertos, grupoActual])
+  }, [grupoActual])   // eslint-disable-line react-hooks/exhaustive-deps
   const usarIdInicial = useCallback(() => setIdInicial(null), [])
 
   // Desde el Resumen: ir a una sección con un registro ya abierto
@@ -134,6 +154,7 @@ export default function App() {
     if (seccion === 'auditoria') return <Auditoria />
     if (seccion === 'usuarios') return <Usuarios usuario={usuario} />
     if (seccion === 'contrasena') return <CambiarContrasena />
+    if (seccion === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
     return <PaginaRecurso config={RECURSOS[seccion]} usuario={usuario} campusActivo={campusActivo}
                           idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
   }
@@ -152,12 +173,24 @@ export default function App() {
               Menú
             </button>
           </div>
-          <SelectorCampus valor={campusActivo} alCambiar={elegirCampus} />
-          {grupos.map((g) => (
-            <div key={g} className="grupo-menu">
-              {g && <p className="titulo-grupo">{g}</p>}
-              <ul>
-                {visibles.filter((s) => (s.grupo || '') === g).map((s) => (
+          {grupos.map((g) => {
+            const opciones = visibles.filter((s) => (s.grupo || '') === g)
+            const abierto = !g || gruposAbiertos.includes(g)   // lo que no tiene grupo (Resumen) siempre se ve
+            const idLista = `grupo-${g || 'general'}`.replace(/\s+/g, '-').toLowerCase()
+            return (
+            <div key={g} className={abierto ? 'grupo-menu' : 'grupo-menu cerrado'}>
+              {g && (
+                <button type="button" className="titulo-grupo" aria-expanded={abierto} aria-controls={idLista}
+                        onClick={() => alternarGrupo(g)}>
+                  <span>{g}</span>
+                  <span className="grupo-indicador" aria-hidden="true">
+                    {!abierto && <span className="grupo-cuenta">{opciones.length}</span>}
+                    <span className="grupo-flecha">▾</span>
+                  </span>
+                </button>
+              )}
+              <ul id={idLista} hidden={!abierto}>
+                {opciones.map((s) => (
                   <li key={s.id}>
                     <button type="button" aria-current={seccion === s.id ? 'page' : undefined}
                             onClick={() => { setIdInicial(null); setSeccion(s.id); setMenuAbierto(false) }}>
@@ -167,20 +200,16 @@ export default function App() {
                 ))}
               </ul>
             </div>
-          ))}
-          <div className="sesion">
-            <p><strong>{usuario.nombre}</strong><br /><span className="tenue">{NOMBRES_ROL[usuario.rol]}</span></p>
-            {usuario.rol === 'CONSULTA' && <p className="tenue nota-rol">Tu rol es de solo lectura.</p>}
-            <button type="button" className="boton-secundario" aria-current={seccion === 'contrasena' ? 'page' : undefined}
-                    onClick={() => { setSeccion('contrasena'); setMenuAbierto(false) }}>
-              Cambiar contraseña
-            </button>
-            <button type="button" className="boton-secundario" onClick={() => { salir(); setSesion(null) }}>
-              Cerrar sesión
-            </button>
-          </div>
+            )
+          })}
         </nav>
-        <main className="principal">{pagina()}</main>
+        <div className="columna-principal">
+          <BarraSuperior usuario={usuario}
+                         selectorCampus={<SelectorCampus valor={campusActivo} alCambiar={elegirCampus} />}
+                         alIr={(destino) => { setIdInicial(null); setSeccion(destino); setMenuAbierto(false) }}
+                         alSalir={() => { salir(); setSesion(null) }} />
+          <main className="principal">{pagina()}</main>
+        </div>
       </div>
     </ProveedorCatalogos>
   )

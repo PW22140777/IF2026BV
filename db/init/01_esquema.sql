@@ -12,15 +12,22 @@ CREATE TABLE usuarios (
     nombre           TEXT NOT NULL,
     -- Siempre en minúsculas: así UNIQUE también impide «Ana@...» y «ana@...»
     email            TEXT NOT NULL UNIQUE CONSTRAINT usuarios_email_minusculas CHECK (email = lower(email)),
-    hash_contrasena  TEXT NOT NULL,
-    rol              TEXT NOT NULL CHECK (rol IN ('ADMINISTRADOR', 'TECNICO', 'CONSULTA')),
+    hash_contrasena  TEXT,                 -- NULL en un Observador: entra solo con Microsoft
+    rol              TEXT NOT NULL CONSTRAINT usuarios_rol_check
+                     CHECK (rol IN ('ADMINISTRADOR', 'TECNICO', 'CONSULTA', 'OBSERVADOR')),
     activo           BOOLEAN NOT NULL DEFAULT true,
     -- true = contraseña temporal (cuenta nueva o restablecida): solo puede cambiarla
     debe_cambiar_contrasena  BOOLEAN NOT NULL DEFAULT false,
     creado_en        TIMESTAMPTZ NOT NULL DEFAULT now(),
     creado_por       INTEGER,
     modificado_en    TIMESTAMPTZ,
-    modificado_por   INTEGER
+    modificado_por   INTEGER,
+    -- Cuenta externa con la que entra (Observador): proveedor + identificador estable de la persona
+    proveedor_oauth  TEXT,
+    sujeto_oauth     TEXT,
+    CONSTRAINT usuarios_oauth_unico UNIQUE (proveedor_oauth, sujeto_oauth),
+    -- Toda cuenta tiene una forma de entrar: contraseña o cuenta externa
+    CONSTRAINT usuarios_con_acceso CHECK (hash_contrasena IS NOT NULL OR sujeto_oauth IS NOT NULL)
 );
 
 -- Sesiones iniciadas (dueño: auth-service). Los demás servicios las leen en
@@ -37,6 +44,17 @@ CREATE TABLE sesiones (
     ip                 TEXT
 );
 CREATE INDEX sesiones_abiertas ON sesiones (usuario_id) WHERE revocada_en IS NULL;
+
+-- Códigos de un solo uso para entregar la sesión tras entrar con Microsoft (dueño: auth-service).
+-- El navegador recibe el código en la URL y lo cambia por el JWT con POST /auth/oauth/canjear:
+-- así el token nunca viaja en una URL. Se guarda el hash del código, no el código.
+CREATE TABLE oauth_canjes (
+    hash_codigo   TEXT PRIMARY KEY,
+    sesion_id     UUID NOT NULL REFERENCES sesiones (id),
+    creado_en     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expira_en     TIMESTAMPTZ NOT NULL,
+    usado_en      TIMESTAMPTZ
+);
 
 -- ---------------------------------------------------------------------
 -- Recursos inmobiliarios (dueño: inmuebles-service)
@@ -313,6 +331,176 @@ CREATE TABLE consumos (
     motivo_eliminacion  TEXT
 );
 CREATE UNIQUE INDEX consumos_periodo_activo ON consumos (servicio_id, periodo) WHERE eliminado_en IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Archivos adjuntos (fotos, planos, PDF, evidencias de mantenimiento)
+-- La ficha vive aquí; el archivo, en el almacén de archivos-service (un
+-- volumen local), bajo `clave` = carpeta/<sha256>.<ext>. Escriben las fichas
+-- inmuebles-service (edificios, áreas, inventario) y mantenimiento-service
+-- (evidencias de una orden). Al quitar un adjunto la ficha se marca como
+-- eliminada (borrado lógico) y el archivo sí se borra del almacén.
+-- ---------------------------------------------------------------------
+CREATE TABLE archivos_adjuntos (
+    id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    recurso             TEXT NOT NULL
+                        CONSTRAINT adjuntos_recurso_valido
+                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'ORDEN_MANTENIMIENTO', 'COMENTARIO')),
+    recurso_id          INTEGER NOT NULL,
+    nombre              TEXT NOT NULL CONSTRAINT adjuntos_nombre_valido CHECK (length(btrim(nombre)) BETWEEN 1 AND 120),
+    descripcion         TEXT CONSTRAINT adjuntos_descripcion_valida CHECK (length(descripcion) <= 500),
+    categoria           TEXT NOT NULL
+                        CONSTRAINT adjuntos_categoria_valida
+                        CHECK (categoria IN ('FOTO', 'PLANO', 'DOCUMENTO', 'EVIDENCIA', 'OTRO')),
+    nombre_original     TEXT NOT NULL,
+    tipo_mime           TEXT NOT NULL
+                        CONSTRAINT adjuntos_tipo_valido
+                        CHECK (tipo_mime IN ('image/jpeg', 'image/png', 'image/webp', 'application/pdf')),
+    tamano_bytes        INTEGER NOT NULL CONSTRAINT adjuntos_tamano_valido CHECK (tamano_bytes > 0),
+    sha256              CHAR(64) NOT NULL,       -- huella del contenido: comprueba que nadie lo cambió
+    clave               TEXT NOT NULL,           -- dónde está en el almacén
+    propiedades         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por          INTEGER NOT NULL REFERENCES usuarios (id),
+    modificado_en       TIMESTAMPTZ,
+    modificado_por      INTEGER,
+    eliminado_en        TIMESTAMPTZ,
+    eliminado_por       INTEGER,
+    motivo_eliminacion  TEXT
+);
+CREATE INDEX adjuntos_por_recurso ON archivos_adjuntos (recurso, recurso_id) WHERE eliminado_en IS NULL;
+CREATE INDEX adjuntos_por_clave ON archivos_adjuntos (clave) WHERE eliminado_en IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Comentarios sobre los recursos (dueño: comentarios-service)
+-- Los escribe un Observador; el Técnico y el Administrador pueden responder
+-- (respuesta_a). Solo el Administrador los oculta: borrado lógico con motivo.
+-- ---------------------------------------------------------------------
+CREATE TABLE comentarios (
+    id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    recurso             TEXT NOT NULL
+                        CONSTRAINT comentarios_recurso_valido
+                        CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'SERVICIO', 'CONSUMO')),
+    recurso_id          INTEGER NOT NULL,
+    respuesta_a         INTEGER REFERENCES comentarios (id),   -- NULL = comentario nuevo; si no, responde a ese
+    texto               TEXT NOT NULL CONSTRAINT comentarios_texto_valido CHECK (length(btrim(texto)) BETWEEN 1 AND 2000),
+    propiedades         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por          INTEGER NOT NULL REFERENCES usuarios (id),
+    modificado_en       TIMESTAMPTZ,
+    modificado_por      INTEGER,
+    eliminado_en        TIMESTAMPTZ,
+    eliminado_por       INTEGER,
+    motivo_eliminacion  TEXT
+);
+CREATE INDEX comentarios_por_recurso ON comentarios (recurso, recurso_id) WHERE eliminado_en IS NULL;
+
+-- ---------------------------------------------------------------------
+-- Mantenimientos (dueño: mantenimiento-service)
+-- Una plantilla dice a qué recursos aplica, cuándo se crea una orden (por
+-- estado, por calendario o a mano), qué se registra al terminar y en qué
+-- estado queda el recurso según el resultado. Cada orden es un mantenimiento
+-- concreto: Programada -> En curso -> Terminada (o Cancelada).
+-- El estado del recurso lo cambian inmuebles/servicios al recibir el evento.
+-- ---------------------------------------------------------------------
+CREATE TABLE plantillas_mantenimiento (
+    id                  INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre              TEXT NOT NULL,
+    descripcion         TEXT,
+    recurso             TEXT NOT NULL
+                        CONSTRAINT plantillas_recurso_valido CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'SERVICIO')),
+    tipo_elemento       TEXT,           -- solo inventario: clave de tipos_elemento (NULL = cualquier tipo)
+    disparo             TEXT NOT NULL
+                        CONSTRAINT plantillas_disparo_valido CHECK (disparo IN ('ESTADO', 'PERIODICO', 'MANUAL')),
+    estados_disparo     JSONB NOT NULL DEFAULT '[]'::jsonb,   -- disparo ESTADO: ["MALO", "FUERA_DE_SERVICIO"]
+    cada_dias           INTEGER CONSTRAINT plantillas_cada_dias_valido CHECK (cada_dias BETWEEN 1 AND 3650),
+    estado_al_iniciar   TEXT,           -- NULL = el recurso no cambia al iniciar
+    estado_resuelto     TEXT NOT NULL,
+    estado_parcial      TEXT NOT NULL,
+    estado_no_resuelto  TEXT NOT NULL,
+    lista_verificacion  JSONB NOT NULL DEFAULT '[]'::jsonb,   -- mismo formato que propiedades_definidas
+    activa              BOOLEAN NOT NULL DEFAULT true,
+    propiedades         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por          INTEGER,
+    modificado_en       TIMESTAMPTZ,
+    modificado_por      INTEGER,
+    eliminado_en        TIMESTAMPTZ,
+    eliminado_por       INTEGER,
+    motivo_eliminacion  TEXT,
+    CONSTRAINT plantillas_periodo CHECK (disparo <> 'PERIODICO' OR cada_dias IS NOT NULL)
+);
+
+CREATE TABLE ordenes_mantenimiento (
+    id                    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    plantilla_id          INTEGER NOT NULL REFERENCES plantillas_mantenimiento (id),
+    recurso               TEXT NOT NULL
+                          CONSTRAINT ordenes_recurso_valido CHECK (recurso IN ('EDIFICIO', 'AREA', 'INVENTARIO', 'SERVICIO')),
+    recurso_id            INTEGER NOT NULL,
+    origen                TEXT NOT NULL CONSTRAINT ordenes_origen_valido CHECK (origen IN ('ESTADO', 'PERIODICO', 'MANUAL')),
+    estado                TEXT NOT NULL DEFAULT 'PROGRAMADA'
+                          CONSTRAINT ordenes_estado_valido CHECK (estado IN ('PROGRAMADA', 'EN_CURSO', 'TERMINADA', 'CANCELADA')),
+    fecha_programada      DATE NOT NULL DEFAULT CURRENT_DATE,
+    iniciada_en           TIMESTAMPTZ,
+    iniciada_por          INTEGER,
+    terminada_en          TIMESTAMPTZ,
+    terminada_por         INTEGER,
+    resultado             TEXT CONSTRAINT ordenes_resultado_valido CHECK (resultado IN ('RESUELTO', 'PARCIAL', 'NO_RESUELTO')),
+    respuestas            JSONB NOT NULL DEFAULT '{}'::jsonb,  -- lo que se registró de la lista de verificación
+    notas                 TEXT,
+    estado_recurso_nuevo  TEXT,          -- estado que se pidió aplicar al recurso en la última transición
+    motivo_cancelacion    TEXT,
+    propiedades           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creado_en             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    creado_por            INTEGER,
+    modificado_en         TIMESTAMPTZ,
+    modificado_por        INTEGER,
+    eliminado_en          TIMESTAMPTZ,
+    eliminado_por         INTEGER,
+    motivo_eliminacion    TEXT,
+    CONSTRAINT ordenes_terminada_con_resultado CHECK (estado <> 'TERMINADA' OR resultado IS NOT NULL)
+);
+-- Una sola orden abierta por plantilla y recurso, aunque un evento llegue dos veces
+CREATE UNIQUE INDEX ordenes_una_abierta ON ordenes_mantenimiento (plantilla_id, recurso, recurso_id)
+    WHERE estado IN ('PROGRAMADA', 'EN_CURSO') AND eliminado_en IS NULL;
+CREATE INDEX ordenes_por_recurso ON ordenes_mantenimiento (recurso, recurso_id);
+
+-- Técnicos asignados a cada orden (uno o más). Quitar a uno no borra la fila:
+-- marca quitado_en, así se sabe quién estuvo asignado y cuándo
+CREATE TABLE ordenes_tecnicos (
+    id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    orden_id      INTEGER NOT NULL REFERENCES ordenes_mantenimiento (id),
+    usuario_id    INTEGER NOT NULL REFERENCES usuarios (id),
+    asignado_en   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    asignado_por  INTEGER,
+    quitado_en    TIMESTAMPTZ,
+    quitado_por   INTEGER
+);
+CREATE UNIQUE INDEX ordenes_tecnicos_vigente ON ordenes_tecnicos (orden_id, usuario_id) WHERE quitado_en IS NULL;
+
+-- Plantillas iniciales (el Administrador puede cambiarlas)
+INSERT INTO plantillas_mantenimiento
+    (nombre, descripcion, recurso, tipo_elemento, disparo, estados_disparo, cada_dias, estado_al_iniciar,
+     estado_resuelto, estado_parcial, estado_no_resuelto, lista_verificacion) VALUES
+    ('Correctivo de aire acondicionado', 'Se abre sola cuando un aire acondicionado pasa a malo o fuera de servicio.',
+     'INVENTARIO', 'AIRE_ACONDICIONADO', 'ESTADO', '["MALO", "FUERA_DE_SERVICIO"]', NULL, NULL,
+     'BUENO', 'REGULAR', 'FUERA_DE_SERVICIO', '[
+        {"clave": "diagnostico", "etiqueta": "Diagnóstico", "tipo": "texto", "requerida": true},
+        {"clave": "piezas_cambiadas", "etiqueta": "Piezas cambiadas", "tipo": "texto"},
+        {"clave": "refrigerante_recargado", "etiqueta": "Se recargó refrigerante", "tipo": "si_no"},
+        {"clave": "temperatura_salida", "etiqueta": "Temperatura de salida", "tipo": "numero", "unidad": "°C", "minimo": -10, "maximo": 40}]'),
+    ('Preventivo de aire acondicionado', 'Limpieza y revisión de cada aire acondicionado cada 90 días.',
+     'INVENTARIO', 'AIRE_ACONDICIONADO', 'PERIODICO', '[]', 90, NULL,
+     'BUENO', 'REGULAR', 'MALO', '[
+        {"clave": "filtros_limpios", "etiqueta": "Filtros limpios", "tipo": "si_no", "requerida": true},
+        {"clave": "serpentin_limpio", "etiqueta": "Serpentín limpio", "tipo": "si_no"},
+        {"clave": "drenaje_libre", "etiqueta": "Drenaje libre", "tipo": "si_no"},
+        {"clave": "presion_refrigerante", "etiqueta": "Presión del refrigerante", "tipo": "numero", "unidad": "psi", "minimo": 0, "maximo": 600}]'),
+    ('Reparación de servicio con falla', 'Se abre sola cuando un servicio básico pasa a «con falla».',
+     'SERVICIO', NULL, 'ESTADO', '["CON_FALLA"]', NULL, 'EN_MANTENIMIENTO',
+     'OPERANDO', 'OPERANDO', 'CON_FALLA', '[
+        {"clave": "causa", "etiqueta": "Causa de la falla", "tipo": "texto", "requerida": true},
+        {"clave": "proveedor_contactado", "etiqueta": "Se contactó al proveedor", "tipo": "si_no"},
+        {"clave": "folio_reporte", "etiqueta": "Folio del reporte", "tipo": "texto"}]');
 
 -- ---------------------------------------------------------------------
 -- Mensajería confiable

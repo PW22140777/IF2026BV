@@ -49,9 +49,13 @@ RUTAS: dict[str, str] = {
     "/api/v1/resumen/servicios": "servicios",
     "/api/v1/historial": "audit",
     "/api/v1/auditoria": "audit",
+    # Solo la descarga con enlace firmado; las demás rutas de archivos-service son internas
+    "/api/v1/archivos/descarga": "archivos",
 }
-SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit")
+SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "archivos")
 RUTAS_PUBLICAS = {"/api/v1/auth/login"}
+# Sin token: la descarga de archivos lleva su propia firma que caduca
+RUTAS_SIN_TOKEN = RUTAS_PUBLICAS | {"/api/v1/archivos/descarga"}
 
 # Cabeceras que no se deben reenviar (son de cada conexión)
 SALTO_A_SALTO = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
@@ -144,7 +148,9 @@ async def _reenviar(request: Request, base: str, cid: str) -> httpx.Response:
 
 
 def _respuesta(r: httpx.Response, cid: str, extra: dict[str, str] | None = None) -> Response:
-    cabeceras = {k: v for k, v in r.headers.items() if k.lower() not in SALTO_A_SALTO}
+    # Las cabeceras de seguridad del gateway reemplazan (no duplican) las que mande el servicio
+    propias = {k.lower() for k in CABECERAS_SEGURIDAD}
+    cabeceras = {k: v for k, v in r.headers.items() if k.lower() not in SALTO_A_SALTO and k.lower() not in propias}
     cabeceras.update(CABECERAS_SEGURIDAD)
     cabeceras["X-Correlation-Id"] = cid
     if extra:
@@ -204,7 +210,7 @@ async def proxy(request: Request, ruta: str):
         return _respuesta(r, cid, {"Content-Security-Policy": CSP_FRONTEND})
 
     # 3. Autenticación (las páginas de Swagger y el login son públicos)
-    if ruta_completa.startswith("/api/") and ruta_completa not in RUTAS_PUBLICAS and request.method != "OPTIONS":
+    if ruta_completa.startswith("/api/") and ruta_completa not in RUTAS_SIN_TOKEN and request.method != "OPTIONS":
         autorizacion = request.headers.get("authorization", "")
         if not autorizacion.lower().startswith("bearer "):
             return _error(401, "Falta el token de acceso", cid, **{"WWW-Authenticate": "Bearer"})

@@ -57,6 +57,9 @@ export const RECURSOS = {
     titulo: 'Edificios',
     singular: 'edificio',
     ruta: '/edificios',
+    adjuntos: '/edificios',   // archivos del edificio: nombre + descripción, como en develop
+    adjuntosSinCategoria: true,
+    fachada: true,            // foto de fachada (PUT /edificios/{id}/fachada)
     historial: 'edificio',
     serviciosFiltro: 'edificio_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => `${r.nombre} (${r.clave})`,
@@ -74,6 +77,8 @@ export const RECURSOS = {
       { nombre: 'superficie_m2', etiqueta: 'Superficie (m²)', tipo: 'numero', paso: '0.01', minimo: 0.01, maximo: 10000000 },
       { nombre: 'estado', etiqueta: 'Estado', tipo: 'opciones', opciones: ESTADOS_INMUEBLE, inicial: 'OPERATIVO' },
       { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'parrafo' },
+      { nombre: 'carpeta_planos', etiqueta: 'Carpeta de planos', tipo: 'enlace',
+        ayuda: 'Enlace a la carpeta con los planos (Drive, OneDrive…)' },
     ],
   },
 
@@ -81,6 +86,7 @@ export const RECURSOS = {
     titulo: 'Áreas',
     singular: 'área',
     ruta: '/areas',
+    adjuntos: '/areas',
     historial: 'area',
     serviciosFiltro: 'area_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => r.nombre,
@@ -106,6 +112,8 @@ export const RECURSOS = {
     titulo: 'Inventario',
     singular: 'elemento',
     ruta: '/inventario',
+    adjuntos: '/inventario',
+    adjuntoInicial: 'FOTO',
     historial: 'inventario',
     nombre: (r) => `${legible(r.tipo)}${r.marca ? ' ' + r.marca : ''}`,
     columnas: [

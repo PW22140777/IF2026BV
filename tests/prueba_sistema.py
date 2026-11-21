@@ -123,6 +123,8 @@ def main():
                     json={"motivo": "Limpieza de la prueba"}).raise_for_status()
     paso("cada tipo de elemento define sus propiedades y la API las valida; solo el Administrador cambia el catálogo")
 
+    probar_archivos(adm, tec, con, ed)
+
     internet = cliente.post("/api/v1/servicios", headers=tec,
                             json={"tipo": "INTERNET", "nombre": f"Enlace {sufijo}", "campus_id": campus["id"]}).json()
     assert cliente.post("/api/v1/consumos", headers=tec,
@@ -166,6 +168,64 @@ def main():
 
     probar_usuarios_y_sesiones(adm, tec, con)
     print("Todo funcionó.")
+
+
+# Archivos mínimos: archivos-service decide el tipo por los primeros bytes
+PNG_PRUEBA = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+JPG_PRUEBA = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+
+
+def probar_archivos(adm, tec, con, ed):
+    ruta = f"/api/v1/edificios/{ed['id']}/archivos"
+    r = cliente.post(ruta, headers=tec, data={"nombre": "Fachada norte", "categoria": "FOTO"},
+                     files={"archivo": ("fachada.png", PNG_PRUEBA, "image/png")})
+    assert r.status_code == 201, r.text
+    adjunto = r.json()
+    assert adjunto["tipo_mime"] == "image/png" and len(adjunto["sha256"]) == 64 and adjunto["url"], adjunto
+    for quien, archivo, estado in ((tec, ("nota.html", b"<script>alert(1)</script>", "image/png"), 422),
+                                   (con, ("fachada.png", PNG_PRUEBA, "image/png"), 403)):
+        r = cliente.post(ruta, headers=quien, data={"nombre": "No debe subirse"}, files={"archivo": archivo})
+        assert r.status_code == estado, r.text
+    paso("el Técnico sube una foto; un HTML disfrazado de imagen se rechaza y Consulta no puede subir")
+
+    lista = cliente.get(ruta, headers=con).json()
+    assert [a["nombre"] for a in lista] == ["Fachada norte"] and lista[0]["creado_por_nombre"], lista
+    url = lista[0]["url"]
+    r = cliente.get(url)   # sin token: el permiso va en la firma
+    assert r.status_code == 200 and r.content == PNG_PRUEBA and r.headers["content-type"] == "image/png", r.status_code
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert cliente.get(url.replace("firma=", "firma=0")).status_code in (403, 422)
+    assert cliente.get(url.replace("expira=", "expira=1")).status_code == 403
+    assert cliente.post("/api/v1/archivos", headers=adm, files={"archivo": ("x.png", PNG_PRUEBA)}).status_code == 404
+    paso("el enlace firmado descarga el archivo sin token; alterado o caducado responde 403 y lo interno no se publica")
+
+    # Foto de fachada: una sola imagen; la nueva reemplaza a la anterior y esa se borra del almacén
+    fachada = f"/api/v1/edificios/{ed['id']}/fachada"
+    r = cliente.put(fachada, headers=tec, files={"archivo": ("fachada.png", PNG_PRUEBA, "image/png")})
+    assert r.status_code == 200 and r.json()["fachada_s3"].startswith(f"edificios/{ed['id']}/fachada/"), r.text
+    primera = cliente.get(f"/api/v1/edificios/{ed['id']}", headers=con).json()["fachada_url"]
+    assert cliente.get(primera).status_code == 200
+    assert any(e["fachada_url"] for e in cliente.get("/api/v1/edificios", headers=con).json() if e["id"] == ed["id"])
+    pdf = cliente.put(fachada, headers=tec, files={"archivo": ("plano.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")})
+    assert pdf.status_code == 422, pdf.text
+    assert cliente.put(fachada, headers=con, files={"archivo": ("f.png", PNG_PRUEBA, "image/png")}).status_code == 403
+    cliente.put(fachada, headers=tec, files={"archivo": ("otra.jpg", JPG_PRUEBA, "image/jpeg")}).raise_for_status()
+    assert cliente.get(primera).status_code == 404
+    paso("la foto de fachada solo acepta imágenes; al cambiarla, la anterior se borra del almacén")
+
+    r = cliente.patch(f"/api/v1/edificios/{ed['id']}", headers=tec, json={"carpeta_planos": "drive.google.com/drive/folders/abc"})
+    assert r.json()["carpeta_planos"] == "https://drive.google.com/drive/folders/abc", r.text
+    r = cliente.patch(f"/api/v1/edificios/{ed['id']}", headers=tec, json={"carpeta_planos": "javascript:alert(1)"})
+    assert r.status_code == 422, r.text
+    paso("la carpeta de planos es un enlace web (se completa https:// y se rechaza javascript:)")
+
+    borrar = f"{ruta}/{adjunto['id']}"
+    assert cliente.request("DELETE", borrar, headers=tec, json={"motivo": "x"}).status_code == 422
+    cliente.request("DELETE", borrar, headers=tec, json={"motivo": "Foto repetida"}).raise_for_status()
+    assert cliente.get(ruta, headers=con).json() == []
+    assert cliente.get(url).status_code == 404
+    esperar(lambda: len(cliente.get(f"/api/v1/historial/ARCHIVO/{adjunto['id']}", headers=adm).json()) >= 2,
+            "quitar pide motivo, borra el archivo del almacén y la ficha queda en el historial (ARCHIVO)")
 
 
 def probar_usuarios_y_sesiones(adm, tec, con):
@@ -238,6 +298,17 @@ def probar_usuarios_y_sesiones(adm, tec, con):
     r = cliente.get("/api/v1/campus", headers=tec)
     assert r.status_code == 401 and "se cerró" in r.json()["detail"], r.text
     paso("después de cerrar sesión, el mismo token ya no sirve")
+
+    computadora, telefono = login("tecnico@escuela.mx", "Tecnico12345"), login("tecnico@escuela.mx", "Tecnico12345")
+    perfil = cliente.get("/api/v1/auth/perfil", headers=telefono).json()
+    assert perfil["email"] == "tecnico@escuela.mx" and perfil["acceso"] == "contrasena", perfil
+    assert len(perfil["sesiones"]) >= 2 and sum(s["actual"] for s in perfil["sesiones"]) == 1, perfil
+    assert "id" not in perfil["sesiones"][0]
+    r = cliente.post("/api/v1/auth/cerrar-otras-sesiones", headers=telefono)
+    assert r.status_code == 200 and r.json()["cerradas"] >= 1, r.text
+    assert cliente.get("/api/v1/campus", headers=computadora).status_code == 401
+    assert cliente.get("/api/v1/campus", headers=telefono).status_code == 200
+    paso("el perfil lista las sesiones abiertas y «cerrar las demás» deja abierta solo la actual")
 
 
 if __name__ == "__main__":

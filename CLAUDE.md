@@ -25,7 +25,7 @@ Roles:
 
 ## Reglas de negocio (no romperlas)
 
-- **Nada se borra físicamente.** Eliminar marca `eliminado_en`, `eliminado_por` y `motivo_eliminacion` (motivo obligatorio, mínimo 5 caracteres). Los usuarios de base de datos de los servicios no tienen permiso `DELETE`. Solo el Administrador restaura.
+- **Nada se borra físicamente.** Eliminar marca `eliminado_en`, `eliminado_por` y `motivo_eliminacion` (motivo obligatorio, mínimo 5 caracteres). Los usuarios de base de datos de los servicios no tienen permiso `DELETE`. Solo el Administrador restaura. Excepción: el archivo de un adjunto sí se borra del almacén; su ficha en `archivos_adjuntos` queda con borrado lógico.
 - **Todo cambio genera un evento** con el estado `antes` y `despues` completos. Se registra con `registrar_evento()` en la misma transacción que el cambio (patrón outbox).
 - **Campus:** todo edificio pertenece a un campus y no puede cambiar de campus. Un área con edificio está en el campus de su edificio; la base lo garantiza con la FK compuesta `areas (edificio_id, campus_id) -> edificios (id, campus_id)`. Un área sin edificio indica su campus y se puede mover. El inventario pertenece al campus de su área (no tiene columna `campus_id`).
 - **Servicios básicos:** abastecen exactamente a uno entre campus, edificio o área (`CHECK num_nonnulls(campus_id, edificio_id, area_id) = 1`). Al cambiar el destino, los otros dos se ponen en null.
@@ -33,12 +33,16 @@ Roles:
 - **Restaurar:** el padre (campus, edificio o área) debe estar activo.
 - **Propiedades flexibles:** cada recurso tiene una columna `propiedades` (JSONB) para datos según el tipo, p. ej. `{"btu": 12000}`. Se agregan, cambian o quitan con `PUT` y `DELETE /{recurso}/{id}/propiedades/{clave}`, y cada cambio queda en el historial.
 - **Tipos de elemento:** el tipo de un elemento de inventario debe existir en `tipos_elemento`, que define sus propiedades (`propiedades_definidas`: clave, etiqueta, tipo texto/numero/opcion/fecha/si_no, límites, opciones, requerida) y si usa medidas. `validar_elemento` revisa las propiedades al crear, modificar o cambiar una sola. Solo el Administrador cambia el catálogo (`roles_edicion=SOLO_ADMIN` en `crear_router_recurso`); la clave no cambia y no se elimina un tipo con elementos activos.
+- **Edificio, como en develop:** foto de fachada en `edificios.fachada_s3` (`PUT /edificios/{id}/fachada`; la respuesta trae `fachada_url` firmada gracias a `completar_salida` en `crear_router_recurso`, y `campos_temporales` la deja fuera del historial), archivos con nombre y descripción, y `carpeta_planos` (enlace; `validar_edificio` agrega `https://` y rechaza otros esquemas).
+- **Archivos adjuntos:** `crear_router_adjuntos()` (`comun/adjuntos.py`) agrega `/{recurso}/{id}/archivos` (listar, subir, quitar con motivo) a edificios, áreas e inventario, y `/evidencias` a las órdenes. La ficha va a `archivos_adjuntos` (evento `ARCHIVO`); el archivo lo guarda `archivos-service` (`comun/almacenamiento.py`, con `X-Token-Interno`), que decide el tipo por los primeros bytes (JPG, PNG, WebP, PDF; 10 MB) y lo nombra con su SHA-256. El navegador descarga solo por `/api/v1/archivos/descarga` con una firma HMAC que caduca; las demás rutas de `archivos-service` no están en `RUTAS`.
 - **Auditoría:** `audit_log` es de solo agregar (triggers bloquean `UPDATE`, `DELETE` y `TRUNCATE`). Cada registro tiene `hash = SHA-256(hash_anterior + JSON canónico)` y firma Ed25519. Solo `audit-service` escribe ahí.
 
 ## Arquitectura
 
 ```text
-Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / audit ──> PostgreSQL (una sola base)
+Navegador ──> gateway :8080 ──(Consul)──> auth / inmuebles / servicios / comentarios / mantenimiento / audit ──> PostgreSQL (una sola base)
+                 │                     └── inmuebles / mantenimiento ──> archivos ──> volumen datos_archivos
+                 │                     └── auth ⇄ Google (o Microsoft Entra ID): registro de Observadores
                  └── frontend (Nginx)              └─ outbox ──> RabbitMQ ──> audit (historial firmado)
                                                                        └────> servicios (reacciones)
 Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con correlation_id
@@ -50,6 +54,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 | `services/auth/` | Login con JWT, usuarios y roles. Crea los usuarios de demostración si la tabla está vacía. |
 | `services/inmuebles/` | Campus, edificios, áreas, inventario y el catálogo `/tipos-elemento`, y `/resumen/inmuebles`. |
 | `services/servicios/` | Agua, luz, consumos, `/resumen/consumos`; consume `campus/edificio/area.eliminado.*`. |
+| `services/archivos/` | Guarda los adjuntos en el volumen `datos_archivos` (`ARCHIVOS_BACKEND=local`) y los entrega con enlaces firmados. No usa la base. `almacen.py` tiene la lógica pura (tipo, firma, rutas). |
 | `services/audit/` | Consume todos los eventos (`#`), mantiene la cadena firmada, historial por recurso, bitácora y verificación. `cadena.py` tiene la lógica pura de hash y firma. |
 | `shared/comun/` | Paquete común instalado en cada imagen (ver abajo). |
 | `frontend/` | React + Vite. Selector global «Campus con el que trabajas» que filtra todas las pantallas. |
@@ -60,7 +65,7 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 ### Paquete `shared/comun`
 
 - `app.py` → `crear_app()`: todos los servicios arrancan así (health, métricas, trazas, Consul, publicador de outbox, consumidores, Swagger).
-- `recursos.py` → `crear_router_recurso()`: CRUD genérico con filtros, propiedades, borrado lógico, restauración e historial. **Para un recurso nuevo usa esto** con ganchos `validar`, `antes_de_eliminar` y `antes_de_restaurar`.
+- `recursos.py` → `crear_router_recurso()`: CRUD genérico con filtros, propiedades, borrado lógico, restauración e historial. **Para un recurso nuevo usa esto** con ganchos `validar`, `antes_de_eliminar` y `antes_de_restaurar`; `roles_edicion` y `roles_lectura` limitan quién escribe y quién lee.
 - `seguridad.py` → `requiere_rol(*TODOS | *EDITORES | *SOLO_ADMIN)`; en cada petición revisa en la tabla `sesiones` que la sesión del JWT siga abierta y usa el rol que dice la base, no el del token. Con una contraseña temporal responde 403, salvo en las rutas marcadas con `aunque_deba_cambiar_contrasena=True`. `SISTEMA` es el usuario de las acciones automáticas.
 - `historial.py` → `registrar_evento()`; el tipo de evento es `recurso.accion.v1`, p. ej. `edificio.creado.v1`.
 - `mensajeria.py` → publicador de outbox y `consumidor()` con 3 reintentos y cola `eventos.fallidos`. Importa `aio_pika`, así que solo se carga si hay `RABBITMQ_URL`.
@@ -72,6 +77,8 @@ Todos ──> Jaeger (trazas), Prometheus + Grafana (métricas), logs JSON con c
 Python 3.12, FastAPI, SQLAlchemy 2 asíncrono con `psycopg` 3, Pydantic 2, PyJWT, `bcrypt` (directo, no `passlib`), `aio-pika`, `httpx`, structlog, OpenTelemetry, `prometheus-fastapi-instrumentator`, `cryptography`; PostgreSQL 16, RabbitMQ 3.13, Consul 1.20, Jaeger, Prometheus, Grafana; React 18 + Vite 5 con fuente Public Sans.
 
 ## Ejecutar y probar
+
+Esta copia (`IF2026BV`) trabaja con la **base local** (`COMPOSE_PROFILES=local-db` y `COMPOSE_PROJECT_NAME=infraestructura-fisica-bv` en `.env`), nunca con la de Supabase del equipo.
 
 ```bash
 cp .env.example .env

@@ -83,8 +83,9 @@ def crear_app(
 
     @app.get("/health", include_in_schema=False)
     async def salud():
-        async with db.fabrica_sesiones()() as sesion:
-            await sesion.execute(text("SELECT 1"))
+        if cfg.database_url:   # archivos-service no usa la base
+            async with db.fabrica_sesiones()() as sesion:
+                await sesion.execute(text("SELECT 1"))
         return {"estado": "ok", "servicio": nombre}
 
     for router in routers:

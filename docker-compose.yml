@@ -66,6 +66,7 @@ services:
     environment:
       <<: *entorno-comun
       SERVICIO_NOMBRE: inmuebles
+      ARCHIVOS_TOKEN_INTERNO: ${ARCHIVOS_TOKEN_INTERNO:?Define ARCHIVOS_TOKEN_INTERNO en .env}
       DATABASE_URL: ${DATABASE_URL_INMUEBLES:-postgresql+psycopg://inmuebles_svc:${DB_PASS_INMUEBLES}@postgres:5432/${POSTGRES_DB}}
 
   servicios:
@@ -87,6 +88,21 @@ services:
     volumes:
       - llaves_audit:/data/llaves   # la llave de firma sobrevive a reinicios
 
+  # Adjuntos (fotos, planos, PDF, evidencias) en un volumen local; no usa la base
+  archivos:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/archivos } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: archivos
+      ARCHIVOS_BACKEND: ${ARCHIVOS_BACKEND:-local}
+      ARCHIVOS_DIRECTORIO: /data/archivos
+      ARCHIVOS_SECRETO_FIRMA: ${ARCHIVOS_SECRETO_FIRMA:?Define ARCHIVOS_SECRETO_FIRMA en .env}
+      ARCHIVOS_TOKEN_INTERNO: ${ARCHIVOS_TOKEN_INTERNO:?Define ARCHIVOS_TOKEN_INTERNO en .env}
+      ARCHIVOS_URL_EXPIRACION: ${ARCHIVOS_URL_EXPIRACION:-3600}
+    volumes:
+      - datos_archivos:/data/archivos   # los adjuntos sobreviven a reinicios y reconstrucciones
+
   frontend:
     build: ./frontend
     restart: unless-stopped
@@ -105,6 +121,8 @@ services:
       DB_PASS_INMUEBLES: ${DB_PASS_INMUEBLES}
       DB_PASS_SERVICIOS: ${DB_PASS_SERVICIOS}
       DB_PASS_AUDIT: ${DB_PASS_AUDIT}
+      DB_PASS_COMENTARIOS: ${DB_PASS_COMENTARIOS}
+      DB_PASS_MANTENIMIENTO: ${DB_PASS_MANTENIMIENTO}
     volumes:
       - datos_postgres:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro   # esquema y usuarios (solo la primera vez)
@@ -180,3 +198,4 @@ volumes:
   datos_postgres:
   datos_rabbitmq:
   llaves_audit:
+  datos_archivos:
