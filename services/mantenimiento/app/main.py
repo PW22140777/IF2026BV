@@ -383,9 +383,54 @@ router_evidencias = crear_router_adjuntos(
 )
 
 
+# ---------------------------------------------------- órdenes automáticas
+async def al_cambiar_recurso(evento: dict) -> None:
+    """Un recurso cambió: abre órdenes por estado o cancela las abiertas si se eliminó."""
+    from comun.idempotencia import marcar_procesado
+
+    recurso = evento.get("recurso")
+    if recurso not in MODELOS:
+        return
+    async with fabrica_sesiones()() as db:
+        async with db.begin():
+            if not await marcar_procesado(db, "mantenimiento", evento["evento_id"]):
+                return
+            if evento["accion"] == "ELIMINAR":
+                abiertas = (await db.execute(select(OrdenMantenimiento).where(
+                    OrdenMantenimiento.recurso == recurso, OrdenMantenimiento.recurso_id == evento["recurso_id"],
+                    OrdenMantenimiento.estado.in_(ABIERTAS)))).scalars().all()
+                for orden in abiertas:
+                    await _cancelar(db, orden, SISTEMA, f"Se eliminó {recurso.lower()} {evento['recurso_id']}")
+                return
+            # Solo cambios hechos por una persona: el estado que deja un mantenimiento (SISTEMA) no abre otra orden
+            if evento["accion"] not in ("CREAR", "MODIFICAR") or evento.get("usuario_id") is None:
+                return
+            antes, despues = evento.get("antes") or {}, evento.get("despues") or {}
+            nuevo = despues.get("estado")
+            if not nuevo or nuevo == antes.get("estado"):
+                return
+            plantillas = (await db.execute(select(PlantillaMantenimiento).where(
+                PlantillaMantenimiento.recurso == recurso, PlantillaMantenimiento.disparo == "ESTADO",
+                PlantillaMantenimiento.activa.is_(True), PlantillaMantenimiento.eliminado_en.is_(None)))).scalars().all()
+            for plantilla in plantillas:
+                tipo_ok = not plantilla.tipo_elemento or despues.get("tipo") == plantilla.tipo_elemento
+                if nuevo in plantilla.estados_disparo and tipo_ok:
+                    await _abrir_orden(db, plantilla, evento["recurso_id"], "ESTADO", SISTEMA, [])
+
+
+def _tareas():
+    from comun.mensajeria import consumidor
+
+    return [
+        consumidor("mantenimiento.recursos", ["edificio.*.v1", "area.*.v1", "inventario.*.v1", "servicio.*.v1"],
+                   al_cambiar_recurso),
+    ]
+
+
 app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
     routers=[router_plantillas, router_ordenes, router_evidencias],
+    consumidores=_tareas() if configuracion().rabbitmq_url else (),
 )
