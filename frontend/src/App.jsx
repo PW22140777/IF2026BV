@@ -5,6 +5,7 @@ import { Auditoria } from './componentes/Auditoria'
 import { BarraSuperior } from './componentes/BarraSuperior'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
+import { Recorrido } from './componentes/Recorrido'
 import { Perfil } from './componentes/Perfil'
 import { AyudaCuenta, BotonCuentaInstitucional, Registro, useIntentoFallido, useProveedorOAuth } from './componentes/Registro'
 import { Resumen } from './componentes/Resumen'
@@ -18,6 +19,7 @@ const INTERNOS = ['ADMINISTRADOR', 'TECNICO', 'CONSULTA']
 // Menú: qué ve cada rol (la primera sección visible es la de inicio)
 const SECCIONES = [
   { id: 'resumen', titulo: 'Resumen', roles: INTERNOS },
+  { id: 'recorrido', titulo: 'Recorrido', roles: LECTORES },
   { id: 'edificios', titulo: 'Edificios', roles: INTERNOS, grupo: 'Inmuebles' },
   { id: 'areas', titulo: 'Áreas', roles: INTERNOS, grupo: 'Inmuebles' },
   { id: 'inventario', titulo: 'Inventario', roles: INTERNOS, grupo: 'Inmuebles' },
@@ -166,11 +168,12 @@ export default function App() {
   }
   const visibles = SECCIONES.filter((s) => s.roles.includes(usuario.rol))
   // Si la sección elegida no es de este rol (p. ej. «Resumen» para un Observador), se abre la primera que sí
-  const actual = ['perfil', 'contrasena'].includes(seccion) || visibles.some((s) => s.id === seccion) ? seccion : (visibles[0]?.id || 'perfil')
+  const actual = ['perfil', 'contrasena'].includes(seccion) || visibles.some((s) => s.id === seccion) ? seccion : visibles[0].id
   const grupos = [...new Set(visibles.map((s) => s.grupo || ''))]
 
   function pagina() {
     if (actual === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
+    if (actual === 'recorrido') return <div className="pagina"><Recorrido usuario={usuario} campusActivo={campusActivo} /></div>
     if (actual === 'auditoria') return <Auditoria />
     if (actual === 'usuarios') return <Usuarios usuario={usuario} />
     if (actual === 'contrasena') return <CambiarContrasena />
