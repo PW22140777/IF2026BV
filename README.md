@@ -341,9 +341,10 @@ Es la primera pantalla después de iniciar sesión y la ven todos los roles. Va 
 1. **Indicadores:** edificios y áreas operativos, porcentaje del inventario en buen estado y servicios con problema.
 2. **Estado de edificios y áreas** y **estado del inventario por tipo**, en barras apiladas (bueno, regular, malo, fuera de servicio).
 3. **Tabla de edificios**, de la más urgente a la menos urgente: estado, áreas operativas e inventario dañado. Al hacer clic se abre el edificio.
-4. **Servicios que no operan con normalidad** y **consumos de luz y agua** de los últimos 12 meses.
+4. **Mantenimientos:** programados, en curso, vencidos (fecha programada ya pasada) y sin técnico; terminados en los últimos 30 días por resultado; tiempo promedio de atención (de «Iniciar» a «Terminar»); y los 5 vencidos más antiguos, que se abren con un clic. El indicador «Mantenimientos abiertos» se pone en rojo si hay vencidos.
+5. **Servicios que no operan con normalidad** y **consumos de luz y agua** de los últimos 12 meses.
 
-Usa tres rutas: `/resumen/inmuebles` (además de los totales devuelve `areas_por_estado`, `inventario_por_tipo_y_estado` y `edificios_detalle`), `/resumen/servicios` y `/resumen/consumos`. Las gráficas son barras hechas con CSS, sin librerías de gráficas. El inventario se cuenta por piezas: un registro de 6 bancas suma 6.
+Usa cuatro rutas: `/resumen/inmuebles` (además de los totales devuelve `areas_por_estado`, `inventario_por_tipo_y_estado` y `edificios_detalle`), `/resumen/servicios`, `/resumen/consumos` y `/resumen/mantenimientos`. Si mantenimiento-service no responde, el Resumen se muestra igual sin esa parte. Las gráficas son barras hechas con CSS, sin librerías de gráficas. El inventario se cuenta por piezas: un registro de 6 bancas suma 6.
 
 ## Cálculos derivados del inventario
 

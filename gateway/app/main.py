@@ -53,6 +53,7 @@ RUTAS: dict[str, str] = {
     # Solo la descarga con enlace firmado; las demás rutas de archivos-service son internas
     "/api/v1/archivos/descarga": "archivos",
     "/api/v1/mantenimientos": "mantenimiento",
+    "/api/v1/resumen/mantenimientos": "mantenimiento",
 }
 SERVICIOS_DOCS = ("auth", "inmuebles", "servicios", "audit", "comentarios", "mantenimiento", "archivos")
 # Sin token: el login y el inicio con la cuenta institucional (también cuentan en el límite de logins)
