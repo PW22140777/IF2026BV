@@ -1,6 +1,7 @@
 // Formulario genérico de alta y edición a partir de la descripción del recurso
 import { useState } from 'react'
 import { useCatalogos } from '../catalogos'
+import { ESTADOS_POR_RECURSO, legible } from '../recursos'
 import { EditorDefiniciones, definicionesAApi, definicionesAControl } from './EditorDefiniciones'
 
 // Valor del registro -> texto del control
@@ -12,7 +13,8 @@ function aControl(campo, registro, campusActivo) {
     return ''
   }
   if (campo.tipo === 'campus' && !registro) return campusActivo || ''
-  if (campo.tipo === 'definiciones') return definicionesAControl(registro?.propiedades_definidas)
+  if (campo.tipo === 'definiciones') return definicionesAControl(registro?.[campo.nombre])
+  if (campo.tipo === 'estados') return [...(registro?.[campo.nombre] || [])]
   const valor = registro ? registro[campo.nombre] : campo.inicial
   if (campo.tipo === 'casilla') return Boolean(valor ?? campo.inicial ?? false)
   if (campo.tipo === 'mes') return valor ? String(valor).slice(0, 7) : ''
@@ -32,6 +34,7 @@ function aApi(campo, texto) {
     case 'mes': return { [campo.nombre]: texto ? `${texto}-01` : null }
     case 'fecha': return { [campo.nombre]: texto || null }
     case 'definiciones': return { [campo.nombre]: definicionesAApi(texto) }
+    case 'estados': return { [campo.nombre]: texto }
     case 'destino': {
       const [tipo, id] = texto.split(':')
       return {
@@ -178,6 +181,31 @@ export function Formulario({ config, registro, alGuardar, alCancelar, campusActi
               <option value={valores.tipo}>{valores.tipo} (no está en el catálogo)</option>
             )}
           </select>
+        )
+      }
+      case 'estado': {
+        // Estados del tipo de recurso elegido en el mismo formulario (campo «recurso»)
+        const estados = ESTADOS_POR_RECURSO[valores.recurso] || []
+        return (
+          <select {...comun}>
+            <option value="">{campo.vacio || 'Elige un estado'}</option>
+            {estados.map((e) => <option key={e} value={e}>{legible(e)}</option>)}
+          </select>
+        )
+      }
+      case 'estados': {
+        const estados = ESTADOS_POR_RECURSO[valores.recurso] || []
+        const elegidos = valores[campo.nombre] || []
+        return (
+          <div className="casillas" id={comun.id} role="group">
+            {estados.map((e) => (
+              <label key={e} className="casilla-en-linea">
+                <input type="checkbox" checked={elegidos.includes(e)} disabled={comun.disabled}
+                       onChange={(ev) => cambiar(campo.nombre, ev.target.checked ? [...elegidos, e] : elegidos.filter((x) => x !== e))} />
+                {legible(e)}
+              </label>
+            ))}
+          </div>
         )
       }
       case 'definiciones':

@@ -29,7 +29,7 @@ from .llaves import llave_id, llave_privada, llave_publica, llave_publica_pem
 log = structlog.get_logger()
 
 CANDADO_CADENA = 7_314_159   # número arbitrario para pg_advisory_xact_lock
-RECURSOS = {"CAMPUS", "EDIFICIO", "AREA", "INVENTARIO", "TIPO_ELEMENTO", "SERVICIO", "CONSUMO", "COMENTARIO", "ARCHIVO", "USUARIO", "SESION",
+RECURSOS = {"CAMPUS", "EDIFICIO", "AREA", "INVENTARIO", "TIPO_ELEMENTO", "SERVICIO", "CONSUMO", "COMENTARIO", "PLANTILLA_MANTENIMIENTO", "ARCHIVO", "USUARIO", "SESION",
             "AUDITORIA"}
 
 

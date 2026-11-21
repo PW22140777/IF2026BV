@@ -37,8 +37,18 @@ export const ESTADOS_SERVICIO = [
   ['OPERANDO', 'Operando'], ['CON_FALLA', 'Con falla'], ['SUSPENDIDO', 'Suspendido'], ['EN_MANTENIMIENTO', 'En mantenimiento'],
 ]
 
+// Estados de cada tipo de recurso que puede recibir mantenimiento (coinciden con los CHECK de sus tablas)
+export const ESTADOS_POR_RECURSO = {
+  EDIFICIO: ESTADOS_INMUEBLE.map(([v]) => v),
+  AREA: ESTADOS_INMUEBLE.map(([v]) => v),
+  INVENTARIO: ESTADOS_ELEMENTO.map(([v]) => v),
+  SERVICIO: ESTADOS_SERVICIO.map(([v]) => v),
+}
+export const RECURSOS_MANTENIBLES = [['EDIFICIO', 'Edificio'], ['AREA', 'Área'], ['INVENTARIO', 'Elemento de inventario'], ['SERVICIO', 'Servicio básico']]
+const DISPAROS = [['MANUAL', 'Manual'], ['ESTADO', 'Por estado del recurso'], ['PERIODICO', 'Periódico (cada N días)']]
+
 // Campos cuyos valores son claves fijas en mayúsculas (FUERA_DE_SERVICIO, AIRE_ACONDICIONADO...)
-const CAMPOS_CLAVE = new Set(['estado', 'tipo', 'rol', 'accion', 'recurso'])
+const CAMPOS_CLAVE = new Set(['estado', 'tipo', 'rol', 'accion', 'recurso', 'disparo', 'resultado', 'origen'])
 
 // Texto legible de un valor. Si el campo es una clave fija: FUERA_DE_SERVICIO -> Fuera de servicio
 export function legible(valor, campo = 'estado') {
@@ -176,6 +186,37 @@ export const RECURSOS = {
       { nombre: 'usa_medidas', etiqueta: 'Sus elementos llevan medidas (largo, alto, ancho, espesor)', tipo: 'casilla' },
       { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'parrafo' },
       { nombre: 'propiedades_definidas', etiqueta: 'Propiedades de este tipo', tipo: 'definiciones' },
+    ],
+  },
+
+  // Plantillas de mantenimiento: qué se revisa, cuándo se abre una orden y cómo queda el recurso (solo Administrador)
+  plantillas_mantenimiento: {
+    titulo: 'Plantillas de mantenimiento',
+    singular: 'plantilla',
+    ruta: '/mantenimientos/plantillas',
+    historial: 'plantilla_mantenimiento',
+    sinFiltroCampus: true,
+    sinPropiedadesLibres: true,
+    nombre: (r) => r.nombre,
+    columnas: [['nombre', 'Nombre'], ['recurso', 'Recurso'], ['disparo', 'Se abre'], ['activa', 'Activa']],
+    campos: [
+      { nombre: 'nombre', etiqueta: 'Nombre', tipo: 'texto', requerido: true, ayuda: 'Por ejemplo, Preventivo de aire acondicionado' },
+      { nombre: 'descripcion', etiqueta: 'Descripción', tipo: 'parrafo' },
+      { nombre: 'recurso', etiqueta: 'Se aplica a', tipo: 'opciones', opciones: RECURSOS_MANTENIBLES, inicial: 'INVENTARIO',
+        requerido: true, soloAlCrear: true, ayuda: 'No se puede cambiar después' },
+      { nombre: 'tipo_elemento', etiqueta: 'Tipo de elemento', tipo: 'tipoElemento',
+        ayuda: 'Solo para inventario; vacío = cualquier tipo' },
+      { nombre: 'disparo', etiqueta: 'Cuándo se abre una orden', tipo: 'opciones', opciones: DISPAROS, inicial: 'MANUAL' },
+      { nombre: 'estados_disparo', etiqueta: 'Estados que abren una orden', tipo: 'estados',
+        ayuda: 'Para «Por estado»: cuando una persona deja el recurso en uno de estos estados' },
+      { nombre: 'cada_dias', etiqueta: 'Cada cuántos días', tipo: 'numero', minimo: 1, maximo: 3650,
+        ayuda: 'Para «Periódico»: días desde el último mantenimiento terminado' },
+      { nombre: 'estado_al_iniciar', etiqueta: 'Estado del recurso al iniciar', tipo: 'estado', vacio: 'Sin cambio' },
+      { nombre: 'estado_resuelto', etiqueta: 'Estado si se resuelve', tipo: 'estado', requerido: true },
+      { nombre: 'estado_parcial', etiqueta: 'Estado si queda parcial', tipo: 'estado', requerido: true },
+      { nombre: 'estado_no_resuelto', etiqueta: 'Estado si no se resuelve', tipo: 'estado', requerido: true },
+      { nombre: 'activa', etiqueta: 'Activa', tipo: 'casilla', inicial: true },
+      { nombre: 'lista_verificacion', etiqueta: 'Lista de verificación (lo que registra el técnico)', tipo: 'definiciones' },
     ],
   },
 

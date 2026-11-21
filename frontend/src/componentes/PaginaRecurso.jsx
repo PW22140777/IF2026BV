@@ -152,6 +152,8 @@ function Detalle({ config, registro, usuario, campusActivo, alActualizar, alCerr
     if (campo.tipo === 'servicio') return catalogos.nombreServicio(v)
     if (campo.tipo === 'tipoElemento') return catalogos.nombreTipo(v)
     if (campo.tipo === 'definiciones') return resumenDefiniciones(v)
+    if (campo.tipo === 'estado') return legible(v, 'estado')
+    if (campo.tipo === 'estados') return v?.length ? v.map((e) => legible(e, 'estado')).join(', ') : '—'
     if (campo.tipo === 'destino') return catalogos.destinoServicio(registro)
     if (campo.tipo === 'enlace') {
       return /^https?:\/\//i.test(v || '') ? <a href={v} target="_blank" rel="noreferrer">Abrir carpeta</a> : '—'

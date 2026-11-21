@@ -26,6 +26,7 @@ const SECCIONES = [
   { id: 'servicios', titulo: 'Agua y luz', roles: INTERNOS, grupo: 'Servicios básicos' },
   { id: 'consumos', titulo: 'Consumos', roles: INTERNOS, grupo: 'Servicios básicos' },
   { id: 'tipos_elemento', titulo: 'Tipos de elemento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
+  { id: 'plantillas_mantenimiento', titulo: 'Plantillas de mantenimiento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'auditoria', titulo: 'Auditoría', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'usuarios', titulo: 'Usuarios', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
 ]

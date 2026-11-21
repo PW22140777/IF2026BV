@@ -107,6 +107,15 @@ services:
       ARCHIVOS_TOKEN_INTERNO: ${ARCHIVOS_TOKEN_INTERNO:?Define ARCHIVOS_TOKEN_INTERNO en .env}
       DATABASE_URL: ${DATABASE_URL_COMENTARIOS:-postgresql+psycopg://comentarios_svc:${DB_PASS_COMENTARIOS}@postgres:5432/${POSTGRES_DB}}
 
+  mantenimiento:
+    <<: *backend
+    build: { context: ., dockerfile: backend.Dockerfile, args: { SERVICIO: services/mantenimiento } }
+    environment:
+      <<: *entorno-comun
+      SERVICIO_NOMBRE: mantenimiento
+      ARCHIVOS_TOKEN_INTERNO: ${ARCHIVOS_TOKEN_INTERNO:?Define ARCHIVOS_TOKEN_INTERNO en .env}
+      DATABASE_URL: ${DATABASE_URL_MANTENIMIENTO:-postgresql+psycopg://mantenimiento_svc:${DB_PASS_MANTENIMIENTO}@postgres:5432/${POSTGRES_DB}}
+
   # Adjuntos (fotos, planos, PDF, evidencias) en un volumen local; no usa la base
   archivos:
     <<: *backend
