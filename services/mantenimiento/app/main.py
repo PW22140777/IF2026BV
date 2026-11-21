@@ -33,12 +33,130 @@ from comun.seguridad import (
     ADMINISTRADOR, EDITORES, LECTORES_INTERNOS, SISTEMA, SOLO_ADMIN, TECNICO, UsuarioToken, requiere_rol,
 )
 
-from .esquemas import PlantillaActualizar, PlantillaCrear, PlantillaSalida
+from .esquemas import (
+    OrdenCrear, OrdenDetalle, OrdenSalida, Persona, PlantillaActualizar, PlantillaCrear, PlantillaSalida,
+)
 
 log = structlog.get_logger()
 
 # Tabla de cada recurso: solo se lee, para saber si existe y a qué plantillas aplica
+MODELOS = {"EDIFICIO": Edificio, "AREA": Area, "INVENTARIO": ElementoInventario, "SERVICIO": ServicioBasico}
 ABIERTAS = ("PROGRAMADA", "EN_CURSO")
+
+
+# ----------------------------------------------------------------- utilidades
+async def _tecnicos_vigentes(db: AsyncSession, orden_id: int) -> list[int]:
+    filas = await db.execute(select(OrdenTecnico.usuario_id).where(
+        OrdenTecnico.orden_id == orden_id, OrdenTecnico.quitado_en.is_(None)).order_by(OrdenTecnico.id))
+    return list(filas.scalars())
+
+
+async def foto(db: AsyncSession, orden: OrdenMantenimiento) -> dict:
+    """Estado completo de la orden para el historial, con sus técnicos asignados."""
+    salida = OrdenSalida.model_validate(orden)
+    salida.tecnicos = await _tecnicos_vigentes(db, orden.id)
+    return salida.model_dump(mode="json")
+
+
+async def _validar_tecnicos(db: AsyncSession, ids: list[int]) -> list[int]:
+    """Solo cuentas activas de Técnico o Administrador (columnas que este servicio puede leer)."""
+    ids = list(dict.fromkeys(ids))   # sin repetidos, en el mismo orden
+    filas = (await db.execute(select(Usuario.id, Usuario.rol, Usuario.activo).where(Usuario.id.in_(ids)))).all()
+    validos = {i for i, rol, activo in filas if activo and rol in (TECNICO, ADMINISTRADOR)}
+    invalidos = [i for i in ids if i not in validos]
+    if invalidos:
+        raise HTTPException(422, f"Estos usuarios no son técnicos activos y no se les puede asignar: {invalidos}")
+    return ids
+
+
+def _aplica(plantilla: PlantillaMantenimiento, objeto) -> bool:
+    """Una plantilla de inventario con tipo solo aplica a elementos de ese tipo."""
+    return not (plantilla.recurso == "INVENTARIO" and plantilla.tipo_elemento and objeto.tipo != plantilla.tipo_elemento)
+
+
+async def _abrir_orden(db: AsyncSession, plantilla: PlantillaMantenimiento, recurso_id: int, origen: str,
+                       usuario: UsuarioToken, tecnicos: list[int], fecha: date | None = None) -> OrdenMantenimiento | None:
+    """Crea una orden si no hay otra abierta de la misma plantilla para ese recurso. El llamador hace commit."""
+    abierta = (await db.execute(select(OrdenMantenimiento.id).where(
+        OrdenMantenimiento.plantilla_id == plantilla.id, OrdenMantenimiento.recurso_id == recurso_id,
+        OrdenMantenimiento.recurso == plantilla.recurso, OrdenMantenimiento.estado.in_(ABIERTAS),
+        OrdenMantenimiento.eliminado_en.is_(None)))).first()
+    if abierta:
+        return None
+    try:
+        # Punto de guardado: si otra réplica la creó al mismo tiempo, el índice único lo impide sin romper lo demás
+        async with db.begin_nested():
+            orden = OrdenMantenimiento(plantilla_id=plantilla.id, recurso=plantilla.recurso, recurso_id=recurso_id,
+                                       origen=origen, estado="PROGRAMADA", fecha_programada=fecha or date.today(),
+                                       creado_por=usuario.id, creado_en=datetime.now(timezone.utc))
+            db.add(orden)
+            await db.flush()
+            for tecnico in tecnicos:
+                db.add(OrdenTecnico(orden_id=orden.id, usuario_id=tecnico, asignado_por=usuario.id,
+                                    asignado_en=datetime.now(timezone.utc)))
+            await db.flush()
+    except IntegrityError:
+        return None
+    await db.refresh(orden)
+    await registrar_evento(db, accion="CREAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
+                           despues=await foto(db, orden),
+                           motivo=None if origen == "MANUAL" else f"Abierta por {origen.lower()}: {plantilla.nombre}")
+    return orden
+
+
+async def _orden_abierta(db: AsyncSession, id_: int) -> OrdenMantenimiento:
+    orden = await db.get(OrdenMantenimiento, id_)
+    if orden is None or orden.eliminado_en is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No existe la orden de mantenimiento {id_}")
+    return orden
+
+
+async def _nombres_recursos(db: AsyncSession, ordenes: list[OrdenMantenimiento]) -> dict[tuple[str, int], str]:
+    """Nombre legible de cada recurso, p. ej. «Aire acondicionado en Aula 3»."""
+    nombres: dict[tuple[str, int], str] = {}
+    por_tipo: dict[str, set[int]] = {}
+    for o in ordenes:
+        por_tipo.setdefault(o.recurso, set()).add(o.recurso_id)
+    for recurso, ids in por_tipo.items():
+        if recurso == "INVENTARIO":
+            filas = await db.execute(
+                select(ElementoInventario.id, func.coalesce(TipoElemento.nombre, ElementoInventario.tipo), Area.nombre)
+                .join(Area, Area.id == ElementoInventario.area_id)
+                .outerjoin(TipoElemento, (TipoElemento.clave == ElementoInventario.tipo) & TipoElemento.eliminado_en.is_(None))
+                .where(ElementoInventario.id.in_(ids)))
+            nombres.update({(recurso, i): f"{tipo} en {area}" for i, tipo, area in filas.all()})
+        else:
+            modelo = MODELOS[recurso]
+            filas = await db.execute(select(modelo.id, modelo.nombre).where(modelo.id.in_(ids)))
+            nombres.update({(recurso, i): nombre for i, nombre in filas.all()})
+    return nombres
+
+
+async def _detalles(db: AsyncSession, ordenes: list[OrdenMantenimiento]) -> list[OrdenDetalle]:
+    if not ordenes:
+        return []
+    ids = [o.id for o in ordenes]
+    plantillas = {p.id: p for p in (await db.execute(select(PlantillaMantenimiento).where(
+        PlantillaMantenimiento.id.in_({o.plantilla_id for o in ordenes})))).scalars()}
+    asignaciones = (await db.execute(
+        select(OrdenTecnico.orden_id, Usuario.id, Usuario.nombre).join(Usuario, Usuario.id == OrdenTecnico.usuario_id)
+        .where(OrdenTecnico.orden_id.in_(ids), OrdenTecnico.quitado_en.is_(None)).order_by(OrdenTecnico.id))).all()
+    personas = {o.iniciada_por for o in ordenes} | {o.terminada_por for o in ordenes}
+    nombres_usuarios = dict((await db.execute(select(Usuario.id, Usuario.nombre).where(
+        Usuario.id.in_([p for p in personas if p is not None])))).all())
+    nombres = await _nombres_recursos(db, ordenes)
+    resultado = []
+    for o in ordenes:
+        asignados = [Persona(id=u, nombre=n) for oid, u, n in asignaciones if oid == o.id]
+        plantilla = plantillas[o.plantilla_id]
+        resultado.append(OrdenDetalle(
+            **OrdenSalida.model_validate(o).model_dump(exclude={"tecnicos"}), tecnicos=[a.id for a in asignados],
+            plantilla_nombre=plantilla.nombre, lista_verificacion=plantilla.lista_verificacion,
+            recurso_nombre=nombres.get((o.recurso, o.recurso_id), f"{o.recurso.lower()} {o.recurso_id}"),
+            asignados=asignados, iniciada_por_nombre=nombres_usuarios.get(o.iniciada_por),
+            terminada_por_nombre=nombres_usuarios.get(o.terminada_por),
+        ))
+    return resultado
 
 
 # ---------------------------------------------------------------- plantillas
@@ -88,9 +206,62 @@ router_plantillas = crear_router_recurso(
 )
 
 
+# -------------------------------------------------------------------- órdenes
+router_ordenes = APIRouter(prefix="/mantenimientos/ordenes", tags=["Órdenes de mantenimiento"])
+
+
+@router_ordenes.get("", response_model=list[OrdenDetalle], summary="Órdenes de mantenimiento con filtros")
+async def listar_ordenes(
+    estado: str | None = Query(None, description="Uno o varios separados por coma: PROGRAMADA,EN_CURSO"),
+    recurso: str | None = None,
+    recurso_id: int | None = None,
+    limite: int = Query(200, ge=1, le=1000),
+    usuario: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)),
+    db: AsyncSession = Depends(get_db),
+):
+    consulta = select(OrdenMantenimiento).where(OrdenMantenimiento.eliminado_en.is_(None))
+    if estado:
+        consulta = consulta.where(OrdenMantenimiento.estado.in_([e.strip() for e in estado.split(",")]))
+    if recurso:
+        consulta = consulta.where(OrdenMantenimiento.recurso == recurso)
+    if recurso_id is not None:
+        consulta = consulta.where(OrdenMantenimiento.recurso_id == recurso_id)
+    # Primero lo que hay que atender (en curso, luego programadas por fecha), al final lo cerrado
+    prioridad = case({"EN_CURSO": 0, "PROGRAMADA": 1}, value=OrdenMantenimiento.estado, else_=2)
+    consulta = consulta.order_by(prioridad, OrdenMantenimiento.fecha_programada, OrdenMantenimiento.id.desc()).limit(limite)
+    return await _detalles(db, list((await db.execute(consulta)).scalars()))
+
+
+@router_ordenes.get("/{id}", response_model=OrdenDetalle, summary="Una orden de mantenimiento")
+async def ver_orden(id: int, _: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)), db: AsyncSession = Depends(get_db)):
+    return (await _detalles(db, [await _orden_abierta(db, id)]))[0]
+
+
+@router_ordenes.post("", response_model=OrdenDetalle, status_code=201, summary="Programar un mantenimiento a mano")
+async def crear_orden(datos: OrdenCrear, usuario: UsuarioToken = Depends(requiere_rol(*EDITORES)),
+                      db: AsyncSession = Depends(get_db)):
+    plantilla = await db.get(PlantillaMantenimiento, datos.plantilla_id)
+    if plantilla is None or plantilla.eliminado_en is not None or not plantilla.activa:
+        raise HTTPException(422, f"La plantilla {datos.plantilla_id} no existe o no está activa")
+    objeto = await db.get(MODELOS[plantilla.recurso], datos.recurso_id)
+    if objeto is None or objeto.eliminado_en is not None:
+        raise HTTPException(422, f"No existe un registro activo de {plantilla.recurso.lower()} con id {datos.recurso_id}")
+    if not _aplica(plantilla, objeto):
+        raise HTTPException(422, f"La plantilla «{plantilla.nombre}» es para elementos de tipo {plantilla.tipo_elemento}")
+    tecnicos = datos.tecnicos or ([usuario.id] if usuario.rol == TECNICO else [])
+    if not tecnicos:
+        raise HTTPException(422, "Asigna la orden a uno o más técnicos")
+    tecnicos = await _validar_tecnicos(db, tecnicos)
+    orden = await _abrir_orden(db, plantilla, datos.recurso_id, "MANUAL", usuario, tecnicos, datos.fecha_programada)
+    if orden is None:
+        raise HTTPException(409, f"Ya hay una orden abierta de «{plantilla.nombre}» para este recurso; atiende esa")
+    await db.commit()
+    return (await _detalles(db, [orden]))[0]
+
+
 app = crear_app(
     nombre="mantenimiento",
     titulo="mantenimiento-service",
     descripcion="Plantillas y órdenes de mantenimiento: por estado, periódicas o manuales, con técnicos asignados.",
-    routers=[router_plantillas],
+    routers=[router_plantillas, router_ordenes],
 )

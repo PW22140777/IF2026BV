@@ -107,3 +107,52 @@ class PlantillaSalida(SalidaBase):
     activa: bool
 
 
+# -------------------------------------------------------------------- órdenes
+class OrdenCrear(BaseModel):
+    plantilla_id: int = Field(gt=0)
+    recurso_id: int = Field(gt=0, description="El tipo de recurso lo dice la plantilla")
+    fecha_programada: date | None = Field(default=None, description="Vacío = hoy")
+    tecnicos: list[int] = Field(default_factory=list, max_length=10,
+                                description="Vacío: si la crea un Técnico, queda asignada a él")
+
+
+class OrdenSalida(BaseModel):
+    """Estado completo de una orden: es lo que guarda el historial (antes y después)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    plantilla_id: int
+    recurso: str
+    recurso_id: int
+    origen: str
+    estado: str
+    fecha_programada: date
+    iniciada_en: datetime | None
+    iniciada_por: int | None
+    terminada_en: datetime | None
+    terminada_por: int | None
+    resultado: str | None
+    respuestas: dict[str, Any]
+    notas: str | None
+    estado_recurso_nuevo: str | None
+    motivo_cancelacion: str | None
+    creado_en: datetime
+    creado_por: int | None
+    tecnicos: list[int] = []
+
+
+class Persona(BaseModel):
+    id: int
+    nombre: str
+
+
+class OrdenDetalle(OrdenSalida):
+    """Lo que ve la interfaz: la orden con los nombres que necesita para mostrarse."""
+
+    plantilla_nombre: str
+    recurso_nombre: str
+    lista_verificacion: list[dict[str, Any]]
+    asignados: list[Persona]
+    iniciada_por_nombre: str | None = None
+    terminada_por_nombre: str | None = None

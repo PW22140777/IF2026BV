@@ -71,6 +71,7 @@ export const RECURSOS = {
     adjuntos: '/edificios',   // archivos del edificio: nombre + descripción, como en develop
     adjuntosSinCategoria: true,
     fachada: true,            // foto de fachada (PUT /edificios/{id}/fachada)
+    mantenible: 'EDIFICIO',   // se le programan mantenimientos
     historial: 'edificio',
     serviciosFiltro: 'edificio_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => `${r.nombre} (${r.clave})`,
@@ -99,6 +100,7 @@ export const RECURSOS = {
     ruta: '/areas',
     comentable: 'AREA',
     adjuntos: '/areas',
+    mantenible: 'AREA',
     historial: 'area',
     serviciosFiltro: 'area_id',   // para mostrar sus servicios en el detalle (IF-59)
     nombre: (r) => r.nombre,
@@ -127,6 +129,7 @@ export const RECURSOS = {
     comentable: 'INVENTARIO',
     adjuntos: '/inventario',
     adjuntoInicial: 'FOTO',
+    mantenible: 'INVENTARIO',
     historial: 'inventario',
     nombre: (r) => `${legible(r.tipo)}${r.marca ? ' ' + r.marca : ''}`,
     columnas: [
@@ -225,6 +228,7 @@ export const RECURSOS = {
     singular: 'servicio',
     ruta: '/servicios',
     comentable: 'SERVICIO',
+    mantenible: 'SERVICIO',
     historial: 'servicio',
     nombre: (r) => r.nombre,
     columnas: [

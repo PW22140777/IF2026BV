@@ -4,6 +4,7 @@ import { ProveedorCatalogos, useCatalogos } from './catalogos'
 import { Auditoria } from './componentes/Auditoria'
 import { BarraSuperior } from './componentes/BarraSuperior'
 import { CambiarContrasena } from './componentes/CambiarContrasena'
+import { Mantenimientos } from './componentes/Mantenimientos'
 import { PaginaRecurso } from './componentes/PaginaRecurso'
 import { Recorrido } from './componentes/Recorrido'
 import { Perfil } from './componentes/Perfil'
@@ -25,6 +26,7 @@ const SECCIONES = [
   { id: 'inventario', titulo: 'Inventario', roles: INTERNOS, grupo: 'Inmuebles' },
   { id: 'servicios', titulo: 'Agua y luz', roles: INTERNOS, grupo: 'Servicios básicos' },
   { id: 'consumos', titulo: 'Consumos', roles: INTERNOS, grupo: 'Servicios básicos' },
+  { id: 'mantenimientos', titulo: 'Órdenes', roles: INTERNOS, grupo: 'Mantenimiento' },
   { id: 'tipos_elemento', titulo: 'Tipos de elemento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'plantillas_mantenimiento', titulo: 'Plantillas de mantenimiento', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
   { id: 'auditoria', titulo: 'Auditoría', roles: ['ADMINISTRADOR'], grupo: 'Administración' },
@@ -176,11 +178,12 @@ export default function App() {
     if (actual === 'resumen') return <Resumen campusActivo={campusActivo} alAbrir={abrir} />
     if (actual === 'recorrido') return <div className="pagina"><Recorrido usuario={usuario} campusActivo={campusActivo} /></div>
     if (actual === 'auditoria') return <Auditoria />
+    if (actual === 'mantenimientos') return <Mantenimientos usuario={usuario} idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
     if (actual === 'usuarios') return <Usuarios usuario={usuario} />
     if (actual === 'contrasena') return <CambiarContrasena />
     if (actual === 'perfil') return <Perfil alCambiarContrasena={() => setSeccion('contrasena')} />
     return <PaginaRecurso config={RECURSOS[actual]} usuario={usuario} campusActivo={campusActivo}
-                          idInicial={idInicial} alUsarIdInicial={usarIdInicial} />
+                          idInicial={idInicial} alUsarIdInicial={usarIdInicial} alAbrir={abrir} />
   }
 
   return (
