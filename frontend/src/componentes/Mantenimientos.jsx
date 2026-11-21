@@ -10,6 +10,7 @@ import { Historial } from './Historial'
 
 const FILTROS = [
   ['abiertas', 'Abiertas', { estado: 'PROGRAMADA,EN_CURSO' }],
+  ['mias', 'Asignadas a mí', { estado: 'PROGRAMADA,EN_CURSO', mias: true }],
   ['terminadas', 'Terminadas', { estado: 'TERMINADA' }],
   ['canceladas', 'Canceladas', { estado: 'CANCELADA' }],
   ['todas', 'Todas', {}],
@@ -221,7 +222,7 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
 }
 
 export function Mantenimientos({ usuario, idInicial = null, alUsarIdInicial }) {
-  const [filtro, setFiltro] = useState('abiertas')
+  const [filtro, setFiltro] = useState(usuario.rol === 'TECNICO' ? 'mias' : 'abiertas')
   const [ordenes, setOrdenes] = useState([])
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')

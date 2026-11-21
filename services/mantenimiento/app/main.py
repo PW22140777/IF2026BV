@@ -241,6 +241,7 @@ async def listar_ordenes(
     estado: str | None = Query(None, description="Uno o varios separados por coma: PROGRAMADA,EN_CURSO"),
     recurso: str | None = None,
     recurso_id: int | None = None,
+    mias: bool = Query(False, description="Solo las asignadas a quien consulta"),
     limite: int = Query(200, ge=1, le=1000),
     usuario: UsuarioToken = Depends(requiere_rol(*LECTORES_INTERNOS)),
     db: AsyncSession = Depends(get_db),
@@ -252,6 +253,9 @@ async def listar_ordenes(
         consulta = consulta.where(OrdenMantenimiento.recurso == recurso)
     if recurso_id is not None:
         consulta = consulta.where(OrdenMantenimiento.recurso_id == recurso_id)
+    if mias:
+        consulta = consulta.where(OrdenMantenimiento.id.in_(select(OrdenTecnico.orden_id).where(
+            OrdenTecnico.usuario_id == usuario.id, OrdenTecnico.quitado_en.is_(None))))
     # Primero lo que hay que atender (en curso, luego programadas por fecha), al final lo cerrado
     prioridad = case({"EN_CURSO": 0, "PROGRAMADA": 1}, value=OrdenMantenimiento.estado, else_=2)
     consulta = consulta.order_by(prioridad, OrdenMantenimiento.fecha_programada, OrdenMantenimiento.id.desc()).limit(limite)
