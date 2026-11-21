@@ -116,6 +116,14 @@ class OrdenCrear(BaseModel):
                                 description="Vacío: si la crea un Técnico, queda asignada a él")
 
 
+class Asignacion(BaseModel):
+    tecnicos: list[int] = Field(min_length=1, max_length=10, description="Uno o más técnicos")
+
+
+class Cancelacion(BaseModel):
+    motivo: str = Field(min_length=5, max_length=500)
+
+
 class OrdenSalida(BaseModel):
     """Estado completo de una orden: es lo que guarda el historial (antes y después)."""
 

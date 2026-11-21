@@ -13,6 +13,7 @@ const FILTROS = [
 ]
 const TONO = { PROGRAMADA: 'neutro', EN_CURSO: 'medio', TERMINADA: 'bien', CANCELADA: 'mal' }
 const ORIGENES = { ESTADO: 'Por estado del recurso', PERIODICO: 'Periódica', MANUAL: 'Programada a mano' }
+const NOMBRES_ROL = { ADMINISTRADOR: 'Administrador', TECNICO: 'Técnico' }
 const fecha = (iso) => (iso ? new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) : '—')
 const dia = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('es-MX', { dateStyle: 'medium' })
 
@@ -20,8 +21,45 @@ export function EstadoOrden({ valor }) {
   return <span className={`estado estado-${TONO[valor] || 'neutro'}`}>{legible(valor)}</span>
 }
 
+function AsignarTecnicos({ orden, alGuardar }) {
+  const [usuarios, setUsuarios] = useState([])
+  const [elegidos, setElegidos] = useState(orden.tecnicos)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    api('/usuarios').then((us) => setUsuarios(us.filter((u) => u.activo && ['TECNICO', 'ADMINISTRADOR'].includes(u.rol))))
+      .catch((e) => setError(e.message))
+  }, [])
+
+  async function guardar(e) {
+    e.preventDefault()
+    setError('')
+    try { await alGuardar(elegidos) } catch (err) { setError(err.message) }
+  }
+
+  return (
+    <form className="seccion-detalle" onSubmit={guardar}>
+      <h4>Técnicos asignados</h4>
+      <div className="casillas">
+        {usuarios.map((u) => (
+          <label key={u.id} className="casilla-en-linea">
+            <input type="checkbox" checked={elegidos.includes(u.id)}
+                   onChange={(ev) => setElegidos(ev.target.checked ? [...elegidos, u.id] : elegidos.filter((x) => x !== u.id))} />
+            {u.nombre} <span className="tenue">({NOMBRES_ROL[u.rol]})</span>
+          </label>
+        ))}
+      </div>
+      {error && <p className="aviso aviso-error" role="alert">{error}</p>}
+      <div className="acciones">
+        <button type="submit" className="boton-secundario" disabled={elegidos.length === 0}>Guardar asignación</button>
+      </div>
+    </form>
+  )
+}
+
 function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
   const [error, setError] = useState('')
+  const [cancelando, setCancelando] = useState(false)
+  const [motivo, setMotivo] = useState('')
   const [version, setVersion] = useState(0)
   const esAdmin = usuario.rol === 'ADMINISTRADOR'
   // Atienden los técnicos asignados; el Administrador siempre puede
@@ -52,9 +90,38 @@ function DetalleOrden({ orden, usuario, alActualizar, alCerrar }) {
         <div><dt>Programada para</dt><dd>{dia(orden.fecha_programada)}</dd></div>
         <div><dt>Origen</dt><dd>{ORIGENES[orden.origen] || orden.origen}</dd></div>
         <div><dt>Técnicos</dt><dd>{orden.asignados.map((a) => a.nombre).join(', ') || 'Sin asignar'}</dd></div>
+        {orden.iniciada_en && <div><dt>Inició</dt><dd>{orden.iniciada_por_nombre}, {fecha(orden.iniciada_en)}</dd></div>}
+        {orden.motivo_cancelacion && <div><dt>Motivo de cancelación</dt><dd>{orden.motivo_cancelacion}</dd></div>}
       </dl>
 
       {error && <p className="aviso aviso-error" role="alert">{error}</p>}
+
+      {orden.estado === 'PROGRAMADA' && atiende && (
+        <div className="acciones">
+          <button type="button" className="boton-principal" onClick={() => ejecutar('/iniciar', 'POST').catch(() => {})}>
+            Iniciar mantenimiento
+          </button>
+        </div>
+      )}
+      {orden.estado === 'PROGRAMADA' && !atiende && usuario.rol === 'TECNICO' && (
+        <p className="tenue">Esta orden está asignada a otros técnicos{orden.tecnicos.length ? '' : ' (todavía sin asignar)'}.</p>
+      )}
+      {esAdmin && abierta && <AsignarTecnicos key={orden.tecnicos.join(',')} orden={orden} alGuardar={(tecnicos) => ejecutar('/tecnicos', 'PUT', { tecnicos })} />}
+
+      {esAdmin && abierta && (
+        cancelando ? (
+          <form className="confirmar-eliminar" onSubmit={(e) => { e.preventDefault(); ejecutar('/cancelar', 'POST', { motivo }).catch(() => {}) }}>
+            <label htmlFor="motivo-cancelar">¿Por qué se cancela? Queda en el historial.</label>
+            <textarea id="motivo-cancelar" rows={2} minLength={5} required value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+            <div className="acciones">
+              <button type="submit" className="boton-peligro">Cancelar la orden</button>
+              <button type="button" className="boton-secundario" onClick={() => setCancelando(false)}>Volver</button>
+            </div>
+          </form>
+        ) : (
+          <div className="acciones"><button type="button" className="boton-secundario" onClick={() => setCancelando(true)}>Cancelar orden</button></div>
+        )
+      )}
 
     </aside>
   )

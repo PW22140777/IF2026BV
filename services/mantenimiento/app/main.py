@@ -34,7 +34,8 @@ from comun.seguridad import (
 )
 
 from .esquemas import (
-    OrdenCrear, OrdenDetalle, OrdenSalida, Persona, PlantillaActualizar, PlantillaCrear, PlantillaSalida,
+    Asignacion, Cancelacion, OrdenCrear, OrdenDetalle, OrdenSalida, Persona, PlantillaActualizar, PlantillaCrear,
+    PlantillaSalida,
 )
 
 log = structlog.get_logger()
@@ -104,11 +105,33 @@ async def _abrir_orden(db: AsyncSession, plantilla: PlantillaMantenimiento, recu
     return orden
 
 
+async def _cancelar(db: AsyncSession, orden: OrdenMantenimiento, usuario: UsuarioToken, motivo: str) -> None:
+    antes = await foto(db, orden)
+    orden.estado = "CANCELADA"
+    orden.motivo_cancelacion = motivo
+    orden.modificado_en = datetime.now(timezone.utc)
+    orden.modificado_por = usuario.id
+    await db.flush()
+    await registrar_evento(db, accion="CANCELAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id,
+                           usuario=usuario, antes=antes, despues=await foto(db, orden), motivo=motivo)
+
+
 async def _orden_abierta(db: AsyncSession, id_: int) -> OrdenMantenimiento:
     orden = await db.get(OrdenMantenimiento, id_)
     if orden is None or orden.eliminado_en is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No existe la orden de mantenimiento {id_}")
     return orden
+
+
+async def _exige_asignado(db: AsyncSession, orden: OrdenMantenimiento, usuario: UsuarioToken) -> None:
+    """Inician y terminan los técnicos asignados; el Administrador siempre puede."""
+    if usuario.rol == ADMINISTRADOR:
+        return
+    asignados = await _tecnicos_vigentes(db, orden.id)
+    if not asignados:
+        raise HTTPException(403, "La orden todavía no tiene técnicos asignados; pide al Administrador que la asigne")
+    if usuario.id not in asignados:
+        raise HTTPException(403, "Esta orden está asignada a otros técnicos; solo ellos o el Administrador la atienden")
 
 
 async def _nombres_recursos(db: AsyncSession, ordenes: list[OrdenMantenimiento]) -> dict[tuple[str, int], str]:
@@ -255,6 +278,64 @@ async def crear_orden(datos: OrdenCrear, usuario: UsuarioToken = Depends(requier
     orden = await _abrir_orden(db, plantilla, datos.recurso_id, "MANUAL", usuario, tecnicos, datos.fecha_programada)
     if orden is None:
         raise HTTPException(409, f"Ya hay una orden abierta de «{plantilla.nombre}» para este recurso; atiende esa")
+    await db.commit()
+    return (await _detalles(db, [orden]))[0]
+
+
+@router_ordenes.put("/{id}/tecnicos", response_model=OrdenDetalle, summary="Asignar técnicos (Administrador)")
+async def asignar(id: int, datos: Asignacion, usuario: UsuarioToken = Depends(requiere_rol(*SOLO_ADMIN)),
+                  db: AsyncSession = Depends(get_db)):
+    orden = await _orden_abierta(db, id)
+    if orden.estado not in ABIERTAS:
+        raise HTTPException(409, "Solo se asignan técnicos a órdenes programadas o en curso")
+    nuevos = await _validar_tecnicos(db, datos.tecnicos)
+    antes = await foto(db, orden)
+    vigentes = (await db.execute(select(OrdenTecnico).where(
+        OrdenTecnico.orden_id == orden.id, OrdenTecnico.quitado_en.is_(None)))).scalars().all()
+    ahora = datetime.now(timezone.utc)
+    for asignacion in vigentes:
+        if asignacion.usuario_id not in nuevos:      # se quita: queda la fila con la fecha
+            asignacion.quitado_en, asignacion.quitado_por = ahora, usuario.id
+    ya = {a.usuario_id for a in vigentes}
+    for tecnico in nuevos:
+        if tecnico not in ya:
+            db.add(OrdenTecnico(orden_id=orden.id, usuario_id=tecnico, asignado_por=usuario.id, asignado_en=ahora))
+    orden.modificado_en, orden.modificado_por = ahora, usuario.id
+    await db.flush()
+    await registrar_evento(db, accion="MODIFICAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
+                           antes=antes, despues=await foto(db, orden), motivo="Técnicos asignados")
+    await db.commit()
+    return (await _detalles(db, [orden]))[0]
+
+
+@router_ordenes.post("/{id}/iniciar", response_model=OrdenDetalle, summary="Iniciar el mantenimiento")
+async def iniciar(id: int, usuario: UsuarioToken = Depends(requiere_rol(*EDITORES)), db: AsyncSession = Depends(get_db)):
+    orden = await _orden_abierta(db, id)
+    if orden.estado != "PROGRAMADA":
+        raise HTTPException(409, f"La orden está {orden.estado.lower().replace('_', ' ')}; solo se inicia una programada")
+    await _exige_asignado(db, orden, usuario)
+    objeto = await db.get(MODELOS[orden.recurso], orden.recurso_id)
+    if objeto is None or objeto.eliminado_en is not None:
+        raise HTTPException(409, "El recurso de esta orden ya no existe; el Administrador puede cancelarla")
+    plantilla = await db.get(PlantillaMantenimiento, orden.plantilla_id)
+    antes = await foto(db, orden)
+    orden.estado = "EN_CURSO"
+    orden.iniciada_en, orden.iniciada_por = datetime.now(timezone.utc), usuario.id
+    orden.modificado_en, orden.modificado_por = orden.iniciada_en, usuario.id
+    await db.flush()
+    await registrar_evento(db, accion="INICIAR", recurso="ORDEN_MANTENIMIENTO", recurso_id=orden.id, usuario=usuario,
+                           antes=antes, despues=await foto(db, orden))
+    await db.commit()
+    return (await _detalles(db, [orden]))[0]
+
+
+@router_ordenes.post("/{id}/cancelar", response_model=OrdenDetalle, summary="Cancelar una orden (Administrador)")
+async def cancelar(id: int, datos: Cancelacion, usuario: UsuarioToken = Depends(requiere_rol(*SOLO_ADMIN)),
+                   db: AsyncSession = Depends(get_db)):
+    orden = await _orden_abierta(db, id)
+    if orden.estado not in ABIERTAS:
+        raise HTTPException(409, "Solo se cancela una orden programada o en curso")
+    await _cancelar(db, orden, usuario, datos.motivo)
     await db.commit()
     return (await _detalles(db, [orden]))[0]
 
